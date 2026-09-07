@@ -1,0 +1,15 @@
+@import "tailwindcss";
+
+@theme inline {
+  --color-brand-50: #dff3e4;
+  --color-brand-600: #2e9e4f;
+  --color-brand-700: #1b5e32;
+  --color-brand-800: #0f3d24;
+  --font-sans: var(--font-geist-sans);
+}
+
+body {
+  background: #f7f8f6;
+  color: #14201a;
+  font-family: var(--font-geist-sans), sans-serif;
+}
