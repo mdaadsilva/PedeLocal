@@ -1,0 +1,13 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/PedeLocal.Api/PedeLocal.Api.csproj" />
+    <Project Path="src/PedeLocal.Application/PedeLocal.Application.csproj" />
+    <Project Path="src/PedeLocal.Contracts/PedeLocal.Contracts.csproj" />
+    <Project Path="src/PedeLocal.Domain/PedeLocal.Domain.csproj" />
+    <Project Path="src/PedeLocal.Infrastructure/PedeLocal.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/PedeLocal.IntegrationTests/PedeLocal.IntegrationTests.csproj" />
+    <Project Path="tests/PedeLocal.UnitTests/PedeLocal.UnitTests.csproj" />
+  </Folder>
+</Solution>
