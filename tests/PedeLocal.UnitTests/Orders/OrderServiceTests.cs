@@ -3,6 +3,7 @@ using PedeLocal.Application.Common.Exceptions;
 using PedeLocal.Application.Orders;
 using PedeLocal.Contracts.Orders;
 using PedeLocal.Domain.Inventory;
+using PedeLocal.Domain.Notifications;
 using PedeLocal.Domain.Orders;
 using PedeLocal.Infrastructure.Routing;
 using PedeLocal.UnitTests.TestSupport;
@@ -343,5 +344,105 @@ public class OrderServiceTests
         var order = await customerSut.CreateAsync(BuildCreateRequest(fx), CancellationToken.None);
 
         await Assert.ThrowsAsync<NotFoundException>(() => customerSut.GetDeliveryCodeAsync(order.Id, CancellationToken.None));
+    }
+
+    // ---------------------------------------------------------------
+    // Notification fan-out (docs/REALTIME_EVENTS.md)
+    // ---------------------------------------------------------------
+
+    [Fact]
+    public async Task Create_NotifiesEstablishmentStaff_OfNewOrder()
+    {
+        var fx = await OrderTestFixture.CreateAsync();
+        var notifications = new CapturingNotificationService();
+        var user = new FakeCurrentUserService(fx.CustomerUserId);
+        var sut = new OrderService(fx.Db, user, new EstablishmentAccessGuard(fx.Db, user), new HaversineDistanceService(),
+            TestTokenService.Create(), TestDeliveryCodeCipher.Create(), new NoOpRealtimeNotifier(), notifications);
+
+        await sut.CreateAsync(BuildCreateRequest(fx), CancellationToken.None);
+
+        var staffNotification = Assert.Single(notifications.Notifications);
+        Assert.Equal(fx.StaffUserId, staffNotification.UserId);
+        Assert.Equal(NotificationEventType.OrderCreated, staffNotification.Type);
+    }
+
+    [Fact]
+    public async Task MarkPreparing_NotifiesCustomer()
+    {
+        var fx = await OrderTestFixture.CreateAsync();
+        var customerSut = BuildCustomerSut(fx);
+        var order = await customerSut.CreateAsync(BuildCreateRequest(fx), CancellationToken.None);
+
+        var notifications = new CapturingNotificationService();
+        var staffUser = new FakeCurrentUserService(fx.StaffUserId);
+        var staffSut = new OrderService(fx.Db, staffUser, new EstablishmentAccessGuard(fx.Db, staffUser), new HaversineDistanceService(),
+            TestTokenService.Create(), TestDeliveryCodeCipher.Create(), new NoOpRealtimeNotifier(), notifications);
+
+        await staffSut.AcceptAsync(fx.Establishment.Id, order.Id, CancellationToken.None);
+        await staffSut.MarkPreparingAsync(fx.Establishment.Id, order.Id, CancellationToken.None);
+
+        var preparingNotification = Assert.Single(notifications.Notifications, n => n.Type == NotificationEventType.OrderPreparing);
+        Assert.Equal(fx.CustomerUserId, preparingNotification.UserId);
+    }
+
+    [Fact]
+    public async Task Cancel_NotifiesCustomer_OfCancellation()
+    {
+        var fx = await OrderTestFixture.CreateAsync();
+        var customerSut = BuildCustomerSut(fx);
+        var order = await customerSut.CreateAsync(BuildCreateRequest(fx), CancellationToken.None);
+
+        var notifications = new CapturingNotificationService();
+        var staffUser = new FakeCurrentUserService(fx.StaffUserId);
+        var staffSut = new OrderService(fx.Db, staffUser, new EstablishmentAccessGuard(fx.Db, staffUser), new HaversineDistanceService(),
+            TestTokenService.Create(), TestDeliveryCodeCipher.Create(), new NoOpRealtimeNotifier(), notifications);
+
+        await staffSut.CancelAsync(fx.Establishment.Id, order.Id, new CancelOrderRequest("estoque zerado"), CancellationToken.None);
+
+        var cancelNotification = Assert.Single(notifications.Notifications, n => n.Type == NotificationEventType.OrderCancelled);
+        Assert.Equal(fx.CustomerUserId, cancelNotification.UserId);
+    }
+
+    [Fact]
+    public async Task MarkReady_Delivery_NotifiesOnlyEligibleDriversInSameCity()
+    {
+        var fx = await OrderTestFixture.CreateAsync();
+        var customerSut = BuildCustomerSut(fx);
+        var order = await customerSut.CreateAsync(BuildCreateRequest(fx), CancellationToken.None);
+
+        var otherCity = new Domain.Cities.City { Name = "Outra Cidade", State = "SP", IsActive = true };
+        fx.Db.Cities.Add(otherCity);
+
+        Guid AddDriver(Guid cityId, Domain.Drivers.DriverApprovalStatus approval, Domain.Drivers.DriverStatus status)
+        {
+            var userId = Guid.NewGuid();
+            fx.Db.Users.Add(new Domain.Identity.User { Id = userId, Name = "D", Email = $"{userId}@x.com", PhoneNumber = "1", PasswordHash = "x" });
+            fx.Db.Drivers.Add(new Domain.Drivers.Driver
+            {
+                UserId = userId, CityId = cityId, Cpf = Guid.NewGuid().ToString("N")[..11],
+                VehicleType = Domain.Drivers.VehicleType.Motorcycle, PixKeyType = Domain.Drivers.PixKeyType.Cpf, PixKey = "x",
+                ApprovalStatus = approval, Status = status
+            });
+            return userId;
+        }
+
+        var eligibleDriverUserId = AddDriver(fx.City.Id, Domain.Drivers.DriverApprovalStatus.Approved, Domain.Drivers.DriverStatus.Available);
+        AddDriver(fx.City.Id, Domain.Drivers.DriverApprovalStatus.Approved, Domain.Drivers.DriverStatus.Busy); // not available — excluded
+        AddDriver(fx.City.Id, Domain.Drivers.DriverApprovalStatus.PendingApproval, Domain.Drivers.DriverStatus.Available); // not approved — excluded
+        AddDriver(otherCity.Id, Domain.Drivers.DriverApprovalStatus.Approved, Domain.Drivers.DriverStatus.Available); // different city — excluded
+        await fx.Db.SaveChangesAsync();
+
+        var notifications = new CapturingNotificationService();
+        var staffUser = new FakeCurrentUserService(fx.StaffUserId);
+        var staffSut = new OrderService(fx.Db, staffUser, new EstablishmentAccessGuard(fx.Db, staffUser), new HaversineDistanceService(),
+            TestTokenService.Create(), TestDeliveryCodeCipher.Create(), new NoOpRealtimeNotifier(), notifications);
+
+        await staffSut.AcceptAsync(fx.Establishment.Id, order.Id, CancellationToken.None);
+        await staffSut.MarkPreparingAsync(fx.Establishment.Id, order.Id, CancellationToken.None);
+        await staffSut.MarkReadyAsync(fx.Establishment.Id, order.Id, CancellationToken.None);
+
+        var deliveryNotifications = notifications.Notifications.Where(n => n.Type == NotificationEventType.DeliveryAvailable).ToList();
+        var recipient = Assert.Single(deliveryNotifications);
+        Assert.Equal(eligibleDriverUserId, recipient.UserId);
     }
 }

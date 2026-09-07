@@ -4,7 +4,10 @@ public enum NotificationEventType
 {
     OrderCreated,
     OrderAccepted,
+    OrderPreparing,
     OrderReady,
+    OrderOutForDelivery,
+    OrderCancelled,
     DeliveryAvailable,
     DeliveryAccepted,
     OrderDelivered,

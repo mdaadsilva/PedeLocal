@@ -138,8 +138,22 @@ Fluxo do lote: `PENDING → PAYMENT_REPORTED` (estabelecimento) `→ RECEIVED`
 (entregador confirma). O status de cada recebível dentro do lote acompanha o
 status do lote.
 
-## Tempo real (SignalR)
+## Tempo real (SignalR) e notificações
 
-`DeliveryAvailable` (grupo `city-drivers:{cityId}`), `DeliveryAccepted` e
-`DeliveryCompleted` (grupo `establishment:{id}` + `customer:{userId}`). Ver
-`docs/FRONTEND_GUIDE.md#signalr`.
+Ver `docs/REALTIME_EVENTS.md` para a referência completa. Resumo:
+`DeliveryAvailable` (`{ deliveryId }`) vai para `city-drivers:{cityId}`
+quando a entrega fica disponível. Ao ser aceita, `DeliveryAccepted` vai com
+payload completo (`{ deliveryId, driverId }`) para `establishment:{id}` e,
+**também**, com payload reduzido (`{ deliveryId }`, sem `driverId`) para
+`city-drivers:{cityId}` — sinal para os demais entregadores da cidade
+removerem a entrega da lista de disponíveis (o aceite em si continua
+atômico no banco via `Delivery.Version`, não depende deste evento).
+`DeliveryCompleted` (`{ orderId }`) vai para `establishment:{id}` +
+`customer:{userId}`. As transições intermediárias (retirado no
+estabelecimento, saiu para entrega) chegam via `OrderStatusChanged`
+(`docs/ORDER_FLOW.md`), não por um evento de entrega dedicado.
+
+Notificações push/histórico: cada entregador aprovado e disponível na
+cidade é notificado quando uma entrega fica disponível; o cliente é
+notificado quando o entregador sai para entrega e quando a entrega é
+concluída.

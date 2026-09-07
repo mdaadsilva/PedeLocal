@@ -7,6 +7,7 @@ using PedeLocal.Contracts.Orders;
 using PedeLocal.Domain.Deliveries;
 using PedeLocal.Domain.Drivers;
 using PedeLocal.Domain.Identity;
+using PedeLocal.Domain.Notifications;
 using PedeLocal.Infrastructure.Persistence;
 using PedeLocal.Infrastructure.Routing;
 using PedeLocal.UnitTests.TestSupport;
@@ -232,5 +233,41 @@ public class DeliveryServiceTests
             new HaversineDistanceService(), tokenService, TestDeliveryCodeCipher.Create(), new NoOpRealtimeNotifier(), new NoOpNotificationService());
 
         await Assert.ThrowsAsync<ConflictException>(() => orderService.GetDeliveryCodeAsync(orderId, CancellationToken.None));
+    }
+
+    // ---------------------------------------------------------------
+    // Realtime / notification fan-out (docs/REALTIME_EVENTS.md)
+    // ---------------------------------------------------------------
+
+    [Fact]
+    public async Task Accept_NotifiesEstablishmentAndCityDrivers_ForFirstAcceptWinsInvalidation()
+    {
+        var (fx, deliveryId, _) = await SeedReadyDeliveryAsync();
+        var driverUserId = await SeedDriverAsync(fx.Db, fx.City.Id);
+        var realtime = new CapturingRealtimeNotifier();
+        var sut = new DeliveryService(fx.Db, new FakeCurrentUserService(driverUserId), TestTokenService.Create(), realtime, new NoOpNotificationService());
+
+        await sut.AcceptAsync(deliveryId, CancellationToken.None);
+
+        var call = Assert.Single(realtime.DeliveryAcceptedCalls);
+        Assert.Equal(fx.City.Id, call.CityId);
+        Assert.Equal(fx.Establishment.Id, call.EstablishmentId);
+        Assert.Equal(deliveryId, call.DeliveryId);
+    }
+
+    [Fact]
+    public async Task OutForDelivery_NotifiesCustomer()
+    {
+        var (fx, deliveryId, _) = await SeedReadyDeliveryAsync();
+        var driverUserId = await SeedDriverAsync(fx.Db, fx.City.Id);
+        var notifications = new CapturingNotificationService();
+        var sut = new DeliveryService(fx.Db, new FakeCurrentUserService(driverUserId), TestTokenService.Create(), new NoOpRealtimeNotifier(), notifications);
+
+        await sut.AcceptAsync(deliveryId, CancellationToken.None);
+        await sut.PickupAsync(deliveryId, CancellationToken.None);
+        await sut.OutForDeliveryAsync(deliveryId, CancellationToken.None);
+
+        var notification = Assert.Single(notifications.Notifications, n => n.Type == NotificationEventType.OrderOutForDelivery);
+        Assert.Equal(fx.CustomerUserId, notification.UserId);
     }
 }

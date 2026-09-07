@@ -100,6 +100,8 @@ public class OrderService(
 
         await db.SaveChangesAsync(ct);
         await realtime.OrderCreatedAsync(quote.Establishment.Id, order.Id, ct);
+        await NotifyEstablishmentStaffAsync(quote.Establishment.Id, NotificationEventType.OrderCreated,
+            "Novo pedido!", "Um novo pedido foi recebido.", ct);
         return await GetForCustomerAsync(order.Id, ct);
     }
 
@@ -260,6 +262,8 @@ public class OrderService(
         }
 
         await TransitionAsync(order, OrderStatus.Preparing, ct);
+        await notificationService.NotifyAsync(order.CustomerUserId, NotificationEventType.OrderPreparing,
+            "Pedido em preparo!", "O estabelecimento começou a preparar seu pedido.", ct: ct);
         return ToResponse(order);
     }
 
@@ -328,6 +332,7 @@ public class OrderService(
         if (newDelivery is not null)
         {
             await realtime.DeliveryAvailableAsync(order.CityId, newDelivery.Id, ct);
+            await NotifyEligibleDriversAsync(order.CityId, ct);
         }
 
         return ToResponse(order);
@@ -407,6 +412,8 @@ public class OrderService(
 
         await db.SaveChangesAsync(ct);
         await realtime.OrderStatusChangedAsync(order.CustomerUserId, order.EstablishmentId, order.Id, order.Status.ToString(), ct);
+        await notificationService.NotifyAsync(order.CustomerUserId, NotificationEventType.OrderCancelled,
+            "Pedido cancelado", "Seu pedido foi cancelado pelo estabelecimento.", ct: ct);
         return ToResponse(order);
     }
 
@@ -657,6 +664,41 @@ public class OrderService(
         {
             await db.SaveChangesAsync(ct);
             await realtime.OrderStatusChangedAsync(order.CustomerUserId, order.EstablishmentId, order.Id, newStatus.ToString(), ct);
+        }
+    }
+
+    /// <summary>Fans out a notification to every staff user linked to the establishment
+    /// (establishment_users — any StaffRole), regardless of how many people work there.</summary>
+    private async Task NotifyEstablishmentStaffAsync(Guid establishmentId, NotificationEventType type, string title, string body, CancellationToken ct)
+    {
+        var staffUserIds = await db.EstablishmentUsers
+            .Where(eu => eu.EstablishmentId == establishmentId)
+            .Select(eu => eu.UserId)
+            .ToListAsync(ct);
+
+        foreach (var staffUserId in staffUserIds)
+        {
+            await notificationService.NotifyAsync(staffUserId, type, title, body, ct: ct);
+        }
+    }
+
+    /// <summary>Fans out a "new delivery available" notification to every approved, currently
+    /// available driver in the city — the same audience as the DeliveryAvailable realtime group
+    /// (city-drivers:{cityId}), but as a persisted/push notification for drivers who aren't
+    /// actively connected to the hub right now.</summary>
+    private async Task NotifyEligibleDriversAsync(Guid cityId, CancellationToken ct)
+    {
+        var driverUserIds = await db.Drivers
+            .Where(d => d.CityId == cityId
+                && d.ApprovalStatus == Domain.Drivers.DriverApprovalStatus.Approved
+                && d.Status == Domain.Drivers.DriverStatus.Available)
+            .Select(d => d.UserId)
+            .ToListAsync(ct);
+
+        foreach (var driverUserId in driverUserIds)
+        {
+            await notificationService.NotifyAsync(driverUserId, NotificationEventType.DeliveryAvailable,
+                "Nova entrega disponível!", "Há uma nova entrega disponível na sua cidade.", ct: ct);
         }
     }
 

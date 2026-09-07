@@ -168,8 +168,15 @@ GET /api/orders/{id}
 GET /api/orders/{id}/delivery-code   -- ver docs/DELIVERY_FLOW.md
 ```
 
-## Tempo real (SignalR)
+## Tempo real (SignalR) e notificações
 
-Ver `docs/FRONTEND_GUIDE.md#signalr` — eventos `OrderCreated` e
-`OrderStatusChanged` são emitidos nos grupos `establishment:{id}` e
-`customer:{userId}` a cada transição.
+Ver `docs/REALTIME_EVENTS.md` para a referência completa. Resumo: `OrderCreated`
+é emitido em `establishment:{id}` na criação; `OrderStatusChanged` (payload
+`{ orderId, status }`) é emitido em `customer:{userId}` + `establishment:{id}`
+a cada transição de status, incluindo `Cancelled` — não há um evento
+`OrderCancelled` separado, o `status` já carrega essa informação.
+
+Push/histórico (`INotificationService`) acompanha as transições
+voltadas ao cliente (aceito, em preparo, pronto, saiu para entrega,
+entregue/retirado, cancelado) e notifica todo o staff do estabelecimento
+(`establishment_users`) na criação do pedido.

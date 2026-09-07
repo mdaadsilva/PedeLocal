@@ -143,3 +143,5 @@ Convenções gerais, enums e o formato de erro padrão estão em
 | Protocolo | Rota |
 |---|---|
 | SignalR (WebSocket) | `/hubs/pedelocal?access_token=<jwt>` |
+
+Ver `docs/REALTIME_EVENTS.md` para grupos, eventos, payloads e notificações.
