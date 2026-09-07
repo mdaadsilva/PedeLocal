@@ -87,9 +87,11 @@ Toda resposta de erro da API segue o mesmo formato:
 | `ESTABLISHMENT_NOT_ACCEPTING_ORDERS` | 409 | `EstablishmentSettings.AcceptsNewOrders = false` |
 | `ESTABLISHMENT_SUSPENDED` | 409 | Estabelecimento suspenso (comercial) |
 | `ESTABLISHMENT_CLOSED` | 409 | Estabelecimento fechado no momento (operacional) |
-| `DELIVERY_PRICING_NOT_CONFIGURED` | 409 | Estabelecimento sem taxa de entrega configurada |
+| `DELIVERY_PRICING_NOT_CONFIGURED` | 409 | Estabelecimento sem taxa de entrega configurada (só se aplica a `orderType = Delivery`) |
 | `DELIVERY_NOT_AVAILABLE` | 400 | Distância acima do `maxDistanceKm` configurado |
-| `INVALID_ORDER_TRANSITION` | 409 | Ação não permitida no status atual do pedido |
+| `INVALID_ORDER_TRANSITION` | 409 | Ação não permitida no status atual do pedido, ou ação de retirada usada em pedido de entrega (e vice-versa) |
+| `INVALID_ORDER_TYPE` | 400 | `orderType` diferente de `Delivery`/`Pickup` |
+| `ADDRESS_REQUIRED` | 400 | `addressId` ausente em pedido `orderType = Delivery` |
 
 ### Entregadores / Entregas (`api/driver/*`, `api/admin/drivers`)
 
@@ -105,9 +107,10 @@ Toda resposta de erro da API segue o mesmo formato:
 | `DELIVERY_ACCESS_DENIED` | 403 | Entregador não é o responsável por esta entrega |
 | `DELIVERY_ALREADY_TAKEN` | 409 | **A corrida de aceite (seção 40-41)** — outro entregador já aceitou primeiro |
 | `INVALID_DELIVERY_TRANSITION` | 409 | Ação fora da ordem (pickup antes de accept, etc.) |
-| `DELIVERY_CODE_NOT_FOUND` | 404 | Sem código de confirmação gerado para esta entrega |
+| `DELIVERY_CODE_NOT_FOUND` | 404 | Sem código de confirmação gerado para esta entrega (inclui pedidos `Pickup`, que nunca têm um) |
 | `DELIVERY_CODE_EXPIRED` | 409 | Código expirado (24h) |
 | `DELIVERY_CODE_LOCKED` | 409 | Excedeu o número máximo de tentativas (5) |
+| `DELIVERY_CODE_ALREADY_USED` | 409 | Cliente tentou consultar (`GET /api/orders/{id}/delivery-code`) um código que já foi usado para confirmar a entrega |
 | `INVALID_DELIVERY_CODE` | 400 | Código digitado não confere |
 
 ### Financeiro / Assinatura

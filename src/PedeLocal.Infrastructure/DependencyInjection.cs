@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using PedeLocal.Application.Common.Interfaces;
+using PedeLocal.Application.Deliveries;
 using PedeLocal.Application.Identity;
 using PedeLocal.Infrastructure.Identity;
 using PedeLocal.Infrastructure.Notifications;
@@ -33,6 +34,7 @@ public static class DependencyInjection
 
         services.AddSingleton<IPasswordHasher, BCryptPasswordHasher>();
         services.AddSingleton<ITokenService, JwtTokenService>();
+        services.AddSingleton<IDeliveryCodeCipher, AesDeliveryCodeCipher>();
         services.AddSingleton<IRouteDistanceService, HaversineDistanceService>();
         services.AddScoped<IRealtimeNotifier, SignalRRealtimeNotifier>();
         services.AddSingleton<IPushSender, NoOpPushSender>();

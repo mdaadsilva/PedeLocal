@@ -6,7 +6,9 @@ using PedeLocal.Application.Deliveries;
 using PedeLocal.Application.Identity;
 using PedeLocal.Application.Pricing;
 using PedeLocal.Contracts.Common;
+using PedeLocal.Contracts.Deliveries;
 using PedeLocal.Contracts.Orders;
+using PedeLocal.Domain.Addresses;
 using PedeLocal.Domain.Deliveries;
 using PedeLocal.Domain.Establishments;
 using PedeLocal.Domain.Inventory;
@@ -21,9 +23,23 @@ public class OrderService(
     EstablishmentAccessGuard accessGuard,
     IRouteDistanceService routeDistanceService,
     ITokenService tokenService,
+    IDeliveryCodeCipher deliveryCodeCipher,
     IRealtimeNotifier realtime,
     INotificationService notificationService)
 {
+    private record OrderQuote(
+        Establishment Establishment,
+        OrderType Type,
+        PaymentMethod PaymentMethod,
+        Address? DeliveryAddress,
+        List<OrderItem> Items,
+        List<OrderItemOption> Options,
+        decimal Subtotal,
+        decimal DeliveryFee,
+        decimal? DistanceKm,
+        string PricingRuleSnapshotJson,
+        decimal? ChangeForAmount);
+
     private static readonly OrderStatus[] MerchantCancellableStatuses =
     [
         OrderStatus.Pending, OrderStatus.Accepted, OrderStatus.Preparing, OrderStatus.Ready, OrderStatus.WaitingDriver
@@ -47,91 +63,35 @@ public class OrderService(
             }
         }
 
-        if (request.Items.Count == 0)
-        {
-            throw new AppException("ORDER_EMPTY", "O pedido precisa ter ao menos um item.");
-        }
-
-        if (!Enum.TryParse<PaymentMethod>(request.PaymentMethod, ignoreCase: true, out var paymentMethod))
-        {
-            throw new AppException("INVALID_PAYMENT_METHOD", "Forma de pagamento inválida.");
-        }
-
-        var establishment = await db.Establishments.SingleOrDefaultAsync(e => e.Id == request.EstablishmentId, ct)
-            ?? throw new NotFoundException("ESTABLISHMENT_NOT_FOUND", "Estabelecimento não encontrado.");
-
-        var settings = await db.EstablishmentSettings.SingleOrDefaultAsync(s => s.EstablishmentId == establishment.Id, ct);
-        if (settings is null || !settings.AcceptsNewOrders)
-        {
-            throw new ConflictException("ESTABLISHMENT_NOT_ACCEPTING_ORDERS", "Este estabelecimento não está aceitando pedidos no momento.");
-        }
-        if (establishment.CommercialStatus is CommercialStatus.SuspendedPayment or CommercialStatus.SuspendedAdmin or CommercialStatus.Inactive)
-        {
-            throw new ConflictException("ESTABLISHMENT_SUSPENDED", "Este estabelecimento está suspenso.");
-        }
-        if (establishment.OperationalStatus != OperationalStatus.Open)
-        {
-            throw new ConflictException("ESTABLISHMENT_CLOSED", "Este estabelecimento está fechado no momento.");
-        }
-
-        var deliveryAddress = await db.Addresses.SingleOrDefaultAsync(a => a.Id == request.AddressId, ct)
-            ?? throw new NotFoundException("ADDRESS_NOT_FOUND", "Endereço não encontrado.");
-        if (deliveryAddress.UserId != customerId)
-        {
-            throw new ForbiddenException("ADDRESS_ACCESS_DENIED", "Você não tem acesso a este endereço.");
-        }
-        if (deliveryAddress.CityId != establishment.CityId)
-        {
-            throw new AppException("ADDRESS_CITY_MISMATCH", "O endereço de entrega precisa ser da mesma cidade do estabelecimento.");
-        }
-
-        var establishmentAddress = await db.Addresses.SingleOrDefaultAsync(a => a.Id == establishment.AddressId, ct)
-            ?? throw new NotFoundException("ADDRESS_NOT_FOUND", "Endereço do estabelecimento não encontrado.");
-
-        var pricingSettings = await db.DeliveryPricingSettings.SingleOrDefaultAsync(s => s.EstablishmentId == establishment.Id, ct)
-            ?? throw new ConflictException("DELIVERY_PRICING_NOT_CONFIGURED", "Este estabelecimento ainda não configurou a taxa de entrega.");
-
-        var (orderItems, itemOptions, subtotal) = await BuildOrderItemsAsync(establishment.Id, request.Items, ct);
-
-        var distanceKm = routeDistanceService.CalculateDistanceKm(
-            establishmentAddress.Latitude, establishmentAddress.Longitude, deliveryAddress.Latitude, deliveryAddress.Longitude);
-        var feeQuote = DeliveryFeeCalculator.Calculate(pricingSettings, deliveryAddress.Type, distanceKm);
-
-        decimal? changeForAmount = null;
-        if (paymentMethod == PaymentMethod.Cash && request.ChangeForAmount is > 0)
-        {
-            if (request.ChangeForAmount < subtotal + feeQuote.Fee)
-            {
-                throw new AppException("INVALID_CHANGE_AMOUNT", "O valor para troco deve ser maior ou igual ao total do pedido.");
-            }
-            changeForAmount = request.ChangeForAmount;
-        }
+        var quote = await BuildQuoteAsync(customerId, request, ct);
 
         var order = new Order
         {
             CustomerUserId = customerId,
-            EstablishmentId = establishment.Id,
-            CityId = establishment.CityId,
-            AddressId = deliveryAddress.Id,
+            EstablishmentId = quote.Establishment.Id,
+            CityId = quote.Establishment.CityId,
+            AddressId = quote.DeliveryAddress?.Id,
             Status = OrderStatus.Pending,
-            PaymentMethod = paymentMethod,
+            Type = quote.Type,
+            PaymentMethod = quote.PaymentMethod,
             PaymentStatus = PaymentStatus.Pending,
-            ChangeForAmount = changeForAmount,
-            Subtotal = subtotal,
-            DeliveryFee = feeQuote.Fee,
-            Total = subtotal + feeQuote.Fee,
-            CalculatedDistanceKm = feeQuote.DistanceKm,
-            PricingRuleSnapshotJson = feeQuote.PricingRuleSnapshotJson,
+            ChangeForAmount = quote.ChangeForAmount,
+            Notes = string.IsNullOrWhiteSpace(request.Notes) ? null : request.Notes,
+            Subtotal = quote.Subtotal,
+            DeliveryFee = quote.DeliveryFee,
+            Total = quote.Subtotal + quote.DeliveryFee,
+            CalculatedDistanceKm = quote.DistanceKm,
+            PricingRuleSnapshotJson = quote.PricingRuleSnapshotJson,
             IdempotencyKey = string.IsNullOrWhiteSpace(request.IdempotencyKey) ? null : request.IdempotencyKey
         };
         db.Orders.Add(order);
 
-        foreach (var item in orderItems)
+        foreach (var item in quote.Items)
         {
             item.OrderId = order.Id;
             db.OrderItems.Add(item);
         }
-        foreach (var option in itemOptions)
+        foreach (var option in quote.Options)
         {
             db.OrderItemOptions.Add(option);
         }
@@ -139,8 +99,62 @@ public class OrderService(
         db.OrderStatusHistories.Add(new OrderStatusHistory { OrderId = order.Id, Status = OrderStatus.Pending, ChangedByUserId = customerId });
 
         await db.SaveChangesAsync(ct);
-        await realtime.OrderCreatedAsync(establishment.Id, order.Id, ct);
+        await realtime.OrderCreatedAsync(quote.Establishment.Id, order.Id, ct);
         return await GetForCustomerAsync(order.Id, ct);
+    }
+
+    /// <summary>Runs the exact same validation and fee calculation as <see cref="CreateAsync"/>,
+    /// minus persistence — see <see cref="OrderPreviewResponse"/> for the divergence caveat.</summary>
+    public async Task<OrderPreviewResponse> PreviewAsync(CreateOrderRequest request, CancellationToken ct)
+    {
+        var customerId = currentUser.UserId ?? throw new UnauthorizedAppException("UNAUTHENTICATED", "Usuário não autenticado.");
+        var quote = await BuildQuoteAsync(customerId, request, ct);
+
+        return new OrderPreviewResponse(
+            quote.Establishment.Id,
+            quote.Type.ToString(),
+            quote.DeliveryAddress?.Id,
+            quote.Subtotal,
+            quote.DeliveryFee,
+            quote.Subtotal + quote.DeliveryFee,
+            quote.DistanceKm,
+            quote.PricingRuleSnapshotJson,
+            MapItems(quote.Items, quote.Options));
+    }
+
+    /// <summary>Lets the CUSTOMER who owns the order retrieve the plaintext delivery confirmation
+    /// code, so they can read it aloud to the driver. Only the hash is ever compared for driver-side
+    /// confirmation (DeliveryService.ConfirmAsync) — this endpoint separately decrypts a
+    /// customer-only encrypted copy (never the hash). See docs/DECISIONS.md #17.</summary>
+    public async Task<DeliveryCodeResponse> GetDeliveryCodeAsync(Guid orderId, CancellationToken ct)
+    {
+        var customerId = currentUser.UserId ?? throw new UnauthorizedAppException("UNAUTHENTICATED", "Usuário não autenticado.");
+        var order = await db.Orders.SingleOrDefaultAsync(o => o.Id == orderId, ct)
+            ?? throw new NotFoundException("ORDER_NOT_FOUND", "Pedido não encontrado.");
+
+        if (order.CustomerUserId != customerId)
+        {
+            throw new ForbiddenException("ORDER_ACCESS_DENIED", "Você não tem acesso a este pedido.");
+        }
+
+        var delivery = await db.Deliveries.SingleOrDefaultAsync(d => d.OrderId == orderId, ct)
+            ?? throw new NotFoundException("DELIVERY_CODE_NOT_FOUND", "Código de confirmação não encontrado.");
+
+        var confirmation = await db.DeliveryConfirmations.SingleOrDefaultAsync(c => c.DeliveryId == delivery.Id, ct);
+        if (confirmation?.EncryptedCode is null)
+        {
+            throw new NotFoundException("DELIVERY_CODE_NOT_FOUND", "Código de confirmação não encontrado.");
+        }
+        if (confirmation.ConfirmedAtUtc is not null)
+        {
+            throw new ConflictException("DELIVERY_CODE_ALREADY_USED", "Este código já foi utilizado para confirmar a entrega.");
+        }
+        if (confirmation.ExpiresAtUtc < DateTime.UtcNow)
+        {
+            throw new ConflictException("DELIVERY_CODE_EXPIRED", "O código de confirmação expirou.");
+        }
+
+        return new DeliveryCodeResponse(deliveryCodeCipher.Decrypt(confirmation.EncryptedCode), confirmation.ExpiresAtUtc);
     }
 
     public async Task<PagedResult<OrderResponse>> GetMineAsync(PageRequest request, CancellationToken ct)
@@ -263,6 +277,16 @@ public class OrderService(
             throw new ConflictException("INVALID_ORDER_TRANSITION", $"Pedido não pode ficar pronto a partir do status {order.Status}.");
         }
 
+        if (order.Type == OrderType.Pickup)
+        {
+            // No Delivery/DeliveryConfirmation for pickup — there is no driver leg to confirm.
+            // The customer collects in person; the merchant closes the loop via CompletePickupAsync.
+            await TransitionAsync(order, OrderStatus.Ready, ct);
+            await notificationService.NotifyAsync(order.CustomerUserId, NotificationEventType.OrderReady,
+                "Pedido pronto!", "Seu pedido está pronto para retirada no estabelecimento.", ct: ct);
+            return ToResponse(order);
+        }
+
         await TransitionAsync(order, OrderStatus.Ready, ct, save: false);
 
         var deliveryExists = await db.Deliveries.AnyAsync(d => d.OrderId == order.Id, ct);
@@ -283,13 +307,14 @@ public class OrderService(
             {
                 DeliveryId = newDelivery.Id,
                 CodeHash = tokenService.HashToken(code),
+                EncryptedCode = deliveryCodeCipher.Encrypt(code),
                 ExpiresAtUtc = DateTime.UtcNow.AddHours(24),
                 MaxAttempts = 5
             });
-            // The plaintext code itself is deliberately never persisted or logged — only its hash
-            // is stored (see DeliveryConfirmation). It cannot be pushed to the customer here yet;
-            // this is the one gap in the section-57 event list until a "resend code" endpoint or a
-            // dedicated code-delivery seam is added.
+            // The plaintext code is never logged or stored unencrypted. CodeHash (one-way) is the
+            // only thing driver-side confirmation ever compares against; EncryptedCode (reversible,
+            // IDeliveryCodeCipher) exists solely so the owning customer can retrieve it via
+            // GetDeliveryCodeAsync. See docs/DECISIONS.md #17.
         }
 
         order.Status = OrderStatus.WaitingDriver;
@@ -305,6 +330,34 @@ public class OrderService(
             await realtime.DeliveryAvailableAsync(order.CityId, newDelivery.Id, ct);
         }
 
+        return ToResponse(order);
+    }
+
+    /// <summary>Merchant confirms the customer collected a PICKUP order in person — the pickup
+    /// equivalent of the driver-side confirm flow, but with no code/driver involved.</summary>
+    public async Task<OrderResponse> CompletePickupAsync(Guid establishmentId, Guid orderId, CancellationToken ct)
+    {
+        await accessGuard.EnsureAccessAsync(establishmentId, ct);
+        var order = await LoadOwnedMerchantOrderAsync(establishmentId, orderId, ct);
+
+        if (order.Type != OrderType.Pickup)
+        {
+            throw new ConflictException("INVALID_ORDER_TRANSITION", "Esta ação é válida apenas para pedidos de retirada.");
+        }
+        if (order.Status == OrderStatus.PickupCompleted)
+        {
+            return ToResponse(order); // idempotent.
+        }
+        if (order.Status != OrderStatus.Ready)
+        {
+            throw new ConflictException("INVALID_ORDER_TRANSITION", $"Pedido não pode ser concluído a partir do status {order.Status}.");
+        }
+
+        order.PaymentStatus = order.PaymentMethod == PaymentMethod.Pix ? PaymentStatus.Paid : order.PaymentStatus;
+        await TransitionAsync(order, OrderStatus.PickupCompleted, ct);
+
+        await notificationService.NotifyAsync(order.CustomerUserId, NotificationEventType.OrderDelivered,
+            "Pedido retirado!", "Seu pedido foi retirado com sucesso. Bom apetite!", ct: ct);
         return ToResponse(order);
     }
 
@@ -360,6 +413,104 @@ public class OrderService(
     // ---------------------------------------------------------------
     // Internals
     // ---------------------------------------------------------------
+
+    /// <summary>Shared by <see cref="CreateAsync"/> and <see cref="PreviewAsync"/> — the single
+    /// place establishment/address/item/fee validation and calculation happens, so a preview can
+    /// never compute a different total than the create call immediately after it (same inputs, same
+    /// code path). See <see cref="OrderPreviewResponse"/> for the one caveat (inputs changing
+    /// between the two calls).</summary>
+    private async Task<OrderQuote> BuildQuoteAsync(Guid customerId, CreateOrderRequest request, CancellationToken ct)
+    {
+        if (request.Items.Count == 0)
+        {
+            throw new AppException("ORDER_EMPTY", "O pedido precisa ter ao menos um item.");
+        }
+        if (!Enum.TryParse<PaymentMethod>(request.PaymentMethod, ignoreCase: true, out var paymentMethod))
+        {
+            throw new AppException("INVALID_PAYMENT_METHOD", "Forma de pagamento inválida.");
+        }
+        if (!Enum.TryParse<OrderType>(request.OrderType, ignoreCase: true, out var orderType))
+        {
+            throw new AppException("INVALID_ORDER_TYPE", "Tipo de pedido inválido.");
+        }
+
+        var establishment = await db.Establishments.SingleOrDefaultAsync(e => e.Id == request.EstablishmentId, ct)
+            ?? throw new NotFoundException("ESTABLISHMENT_NOT_FOUND", "Estabelecimento não encontrado.");
+
+        var settings = await db.EstablishmentSettings.SingleOrDefaultAsync(s => s.EstablishmentId == establishment.Id, ct);
+        if (settings is null || !settings.AcceptsNewOrders)
+        {
+            throw new ConflictException("ESTABLISHMENT_NOT_ACCEPTING_ORDERS", "Este estabelecimento não está aceitando pedidos no momento.");
+        }
+        if (establishment.CommercialStatus is CommercialStatus.SuspendedPayment or CommercialStatus.SuspendedAdmin or CommercialStatus.Inactive)
+        {
+            throw new ConflictException("ESTABLISHMENT_SUSPENDED", "Este estabelecimento está suspenso.");
+        }
+        if (establishment.OperationalStatus != OperationalStatus.Open)
+        {
+            throw new ConflictException("ESTABLISHMENT_CLOSED", "Este estabelecimento está fechado no momento.");
+        }
+
+        Address? deliveryAddress = null;
+        decimal deliveryFee = 0;
+        decimal? distanceKm = null;
+        var pricingRuleSnapshotJson = "{}";
+
+        if (orderType == OrderType.Delivery)
+        {
+            if (request.AddressId is not { } addressId)
+            {
+                throw new AppException("ADDRESS_REQUIRED", "Endereço de entrega é obrigatório para pedidos com entrega.");
+            }
+
+            deliveryAddress = await db.Addresses.SingleOrDefaultAsync(a => a.Id == addressId, ct)
+                ?? throw new NotFoundException("ADDRESS_NOT_FOUND", "Endereço não encontrado.");
+            if (deliveryAddress.UserId != customerId)
+            {
+                throw new ForbiddenException("ADDRESS_ACCESS_DENIED", "Você não tem acesso a este endereço.");
+            }
+            if (deliveryAddress.CityId != establishment.CityId)
+            {
+                throw new AppException("ADDRESS_CITY_MISMATCH", "O endereço de entrega precisa ser da mesma cidade do estabelecimento.");
+            }
+
+            var establishmentAddress = await db.Addresses.SingleOrDefaultAsync(a => a.Id == establishment.AddressId, ct)
+                ?? throw new NotFoundException("ADDRESS_NOT_FOUND", "Endereço do estabelecimento não encontrado.");
+
+            var pricingSettings = await db.DeliveryPricingSettings.SingleOrDefaultAsync(s => s.EstablishmentId == establishment.Id, ct)
+                ?? throw new ConflictException("DELIVERY_PRICING_NOT_CONFIGURED", "Este estabelecimento ainda não configurou a taxa de entrega.");
+
+            var distance = routeDistanceService.CalculateDistanceKm(
+                establishmentAddress.Latitude, establishmentAddress.Longitude, deliveryAddress.Latitude, deliveryAddress.Longitude);
+            var feeQuote = DeliveryFeeCalculator.Calculate(pricingSettings, deliveryAddress.Type, distance);
+
+            deliveryFee = feeQuote.Fee;
+            distanceKm = feeQuote.DistanceKm;
+            pricingRuleSnapshotJson = feeQuote.PricingRuleSnapshotJson;
+        }
+
+        var (orderItems, itemOptions, subtotal) = await BuildOrderItemsAsync(establishment.Id, request.Items, ct);
+
+        decimal? changeForAmount = null;
+        if (paymentMethod == PaymentMethod.Cash && request.ChangeForAmount is > 0)
+        {
+            if (request.ChangeForAmount < subtotal + deliveryFee)
+            {
+                throw new AppException("INVALID_CHANGE_AMOUNT", "O valor para troco deve ser maior ou igual ao total do pedido.");
+            }
+            changeForAmount = request.ChangeForAmount;
+        }
+
+        return new OrderQuote(establishment, orderType, paymentMethod, deliveryAddress, orderItems, itemOptions,
+            subtotal, deliveryFee, distanceKm, pricingRuleSnapshotJson, changeForAmount);
+    }
+
+    private static List<OrderItemResponse> MapItems(List<OrderItem> items, List<OrderItemOption> options) =>
+        items.Select(i => new OrderItemResponse(
+            i.Id, i.ProductId, i.ProductName, i.UnitPrice, i.Quantity, i.LineTotal,
+            options.Where(o => o.OrderItemId == i.Id)
+                .Select(o => new OrderItemOptionResponse(o.Id, o.OptionName, o.PriceDelta)).ToList()
+        )).ToList();
 
     private async Task<(List<OrderItem> Items, List<OrderItemOption> Options, decimal Subtotal)> BuildOrderItemsAsync(
         Guid establishmentId, List<CreateOrderItemRequest> requestedItems, CancellationToken ct)
@@ -519,9 +670,9 @@ public class OrderService(
             .Include(o => o.StatusHistory);
 
     private static OrderResponse ToResponse(Order o) => new(
-        o.Id, o.CustomerUserId, o.EstablishmentId, o.CityId, o.AddressId, o.Status.ToString(),
+        o.Id, o.CustomerUserId, o.EstablishmentId, o.CityId, o.AddressId, o.Status.ToString(), o.Type.ToString(),
         o.PaymentMethod.ToString(), o.PaymentStatus.ToString(), o.ChangeForAmount,
-        o.Subtotal, o.DeliveryFee, o.Total, o.CalculatedDistanceKm, o.CreatedAtUtc,
+        o.Subtotal, o.DeliveryFee, o.Total, o.CalculatedDistanceKm, o.Notes, o.CreatedAtUtc,
         o.Items.Select(i => new OrderItemResponse(
             i.Id, i.ProductId, i.ProductName, i.UnitPrice, i.Quantity, i.LineTotal,
             i.Options.Select(op => new OrderItemOptionResponse(op.Id, op.OptionName, op.PriceDelta)).ToList()

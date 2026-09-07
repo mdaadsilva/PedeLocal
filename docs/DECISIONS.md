@@ -297,6 +297,89 @@ retornava 200 mesmo com o JSON quebrado, porque só serve o wrapper estático
 — só falhava ao carregar o spec de fato. Corrigido inicializando o
 dicionário antes de indexá-lo.
 
+## 17 — Consulta do código de confirmação pelo cliente: cifra reversível separada do hash
+
+O código de 6 dígitos era, até este ponto, gerado e imediatamente
+descartado após seu hash (`DeliveryConfirmation.CodeHash`, SHA-256 via
+`ITokenService.HashToken`) ser persistido — o texto puro nunca era
+guardado em lugar nenhum, por design (ver comentário original em
+`OrderService.MarkReadyAsync`). O mobile precisa de um jeito do CUSTOMER
+consultar esse código a qualquer momento (para ler em voz alta ao
+entregador), e a especificação exige "hash armazenado no banco" +
+"não retornar hash" — ou seja, o hash continua sendo a única coisa
+validada na confirmação do entregador, mas o texto puro precisa poder
+ser recuperado por quem tem permissão, o que um hash unidirecional nunca
+permite.
+
+**Decisão**: um segundo campo, `DeliveryConfirmation.EncryptedCode`, guarda
+uma cópia do código cifrada de forma **reversível** (AES-GCM,
+`IDeliveryCodeCipher`/`AesDeliveryCodeCipher`), gerada no mesmo instante
+que o hash em `MarkReadyAsync`. A chave AES é derivada
+(`SHA-256(Jwt:Secret + ":delivery-code-cipher")`) do `Jwt:Secret` já
+existente e obrigatório em todo ambiente — evita introduzir uma nova
+configuração/segredo a provisionar em produção, Docker, CI e testes.
+`GET /api/orders/{id}/delivery-code` decifra esse campo só para o
+CUSTOMER dono do pedido; a confirmação do entregador
+(`DeliveryService.ConfirmAsync`) continua comparando exclusivamente o
+hash — nenhum código em texto puro passa perto desse caminho. A API nunca
+retorna `CodeHash` nem `EncryptedCode` brutos em resposta alguma.
+
+**Por quê essa alternativa e não outras**: `IDataProtector` (ASP.NET Core
+Data Protection) resolveria o mesmo problema mas adiciona um subsistema de
+gerência de chaves inteiro (persistência do keyring, relevante ao escalar
+horizontalmente) para um caso de uso pequeno; reutilizar o segredo do JWT
+com AES-GCM direto é a solução mais simples que ainda é criptograficamente
+sólida (AEAD, nonce aleatório por valor).
+
+**Semântica de uso**: a consulta pelo cliente é **repetível** enquanto o
+código estiver ativo (não é de leitura única) — só a confirmação em si é
+de uso único (`ConfirmedAtUtc`). Após confirmada, uma nova consulta
+retorna `409 DELIVERY_CODE_ALREADY_USED`. Expiração (`ExpiresAtUtc`, 24h)
+e tentativas limitadas (`Attempts`/`MaxAttempts`, 5) já existiam para a
+confirmação do entregador e continuam intocados — a consulta do cliente
+não tem seu próprio contador de tentativas porque exige autenticação +
+ownership do pedido, não é um alvo de força bruta do mesmo tipo que digitar
+um código de 6 dígitos sem saber a quem pertence.
+
+## 18 — Suporte a PICKUP: `Order.Type`, `AddressId` nullable, novo status `PickupCompleted`
+
+A especificação original só previa entrega por motorista. Adicionar
+retirada no estabelecimento (`Pickup`) como segundo modo de cumprimento do
+pedido, aditivamente:
+
+- `OrderType { Delivery, Pickup }` (persistido como `string`, decisão #02),
+  `Order.Type`, default `Delivery` — pedidos existentes continuam válidos
+  sem migração de dados além do `defaultValue` da coluna nova.
+- `Order.AddressId` virou `Guid?` (era `Guid` obrigatório) — a única
+  mudança de schema com alcance mais amplo, mas sem quebra: nenhum outro
+  código fora de `OrderService`/`DeliveryService` lia esse campo
+  diretamente, e ambos já foram ajustados.
+- **Novo status terminal `PickupCompleted`**, em vez de reaproveitar
+  `Delivered` — decisão deliberada: `Delivered` significa, em todo o
+  restante do sistema (notificações, docs, o próprio nome), "um entregador
+  entregou". Sobrecarregá-lo para também significar "o cliente retirou"
+  obrigaria todo consumidor (app, relatórios futuros) a checar `Order.Type`
+  só para saber o que um status já deveria dizer sozinho. Um valor dedicado
+  custa uma linha de enum e mantém `status` autoexplicativo.
+- `MarkReadyAsync` bifurca em `Order.Type`: `Pickup` fica em `READY` sem
+  criar `Delivery`/`DeliveryConfirmation` (não há entregador, não há
+  código); `Delivery` segue o fluxo existente inalterado.
+- Novo `POST .../orders/{orderId}/complete-pickup` (staff): fecha o pedido
+  `Pickup` (`READY → PickupCompleted`) — o equivalente comercial do
+  entregador confirmando o código, mas sem entregador nem código
+  envolvidos. Segue a mesma regra de pagamento que `ConfirmAsync` já usava
+  (`Pix` vira `Paid` na conclusão; outras formas ficam como estavam) — não
+  inventa uma regra nova.
+- `DeliveryPricingSettings`/`DELIVERY_PRICING_NOT_CONFIGURED` só se aplicam
+  a `Delivery` — um estabelecimento sem taxa de entrega configurada pode
+  vender só para retirada sem bloqueio algum.
+
+Nenhum flag "este estabelecimento aceita retirada" foi adicionado —
+todo estabelecimento aceita `Pickup` implicitamente. Fora de escopo desta
+etapa; se o negócio precisar restringir por estabelecimento, é aditivo
+(`EstablishmentSettings.AllowsPickup bool`, default `true`) e não exige
+tocar em nada do que foi decidido aqui.
+
 Também instalado `libgssapi-krb5-2` na imagem de runtime (`aspnet:10.0`,
 baseada em Debian): sem essa lib, toda tentativa de conexão do Npgsql
 logava `Cannot load library libgssapi_krb5.so.2` durante a negociação

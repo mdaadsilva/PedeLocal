@@ -127,7 +127,9 @@ já funciona independente disso.
 
 ```text
 Order.status:        Pending, Accepted, Preparing, Ready, WaitingDriver,
-                      DriverAssigned, PickedUp, OutForDelivery, Delivered, Cancelled
+                      DriverAssigned, PickedUp, OutForDelivery, Delivered,
+                      PickupCompleted, Cancelled
+Order.type:           Delivery, Pickup
 Order.paymentMethod:  Pix, Cash, DebitOnDelivery, CreditOnDelivery
 Order.paymentStatus:  Pending, Paid, NotApplicable
 

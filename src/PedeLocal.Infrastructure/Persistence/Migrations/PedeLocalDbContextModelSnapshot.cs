@@ -396,6 +396,9 @@ namespace PedeLocal.Infrastructure.Persistence.Migrations
                     b.Property<DateTime>("CreatedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<string>("EncryptedCode")
+                        .HasColumnType("text");
+
                     b.Property<DateTime>("ExpiresAtUtc")
                         .HasColumnType("timestamp with time zone");
 
@@ -954,7 +957,7 @@ namespace PedeLocal.Infrastructure.Persistence.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
-                    b.Property<Guid>("AddressId")
+                    b.Property<Guid?>("AddressId")
                         .HasColumnType("uuid");
 
                     b.Property<decimal?>("CalculatedDistanceKm")
@@ -981,6 +984,10 @@ namespace PedeLocal.Infrastructure.Persistence.Migrations
                     b.Property<string>("IdempotencyKey")
                         .HasColumnType("text");
 
+                    b.Property<string>("Notes")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
                     b.Property<string>("PaymentMethod")
                         .IsRequired()
                         .HasMaxLength(32)
@@ -1005,6 +1012,11 @@ namespace PedeLocal.Infrastructure.Persistence.Migrations
 
                     b.Property<decimal>("Total")
                         .HasColumnType("numeric(12,2)");
+
+                    b.Property<string>("Type")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
 
                     b.Property<DateTime>("UpdatedAtUtc")
                         .HasColumnType("timestamp with time zone");

@@ -75,12 +75,15 @@ Convenções gerais, enums e o formato de erro padrão estão em
 
 | Método | Rota | Quem |
 |---|---|---|
+| POST | `/api/orders/preview` | CUSTOMER — mesmo corpo de `/api/orders`, não persiste |
 | POST | `/api/orders` | CUSTOMER |
 | GET | `/api/orders?page=` | CUSTOMER |
 | GET | `/api/orders/{id}` | CUSTOMER |
+| GET | `/api/orders/{id}/delivery-code` | CUSTOMER — só o dono do pedido |
 | GET | `/api/merchant/establishments/{id}/orders?status=&page=` | staff |
 | GET | `/api/merchant/establishments/{id}/orders/{orderId}` | staff |
 | POST | `.../orders/{orderId}/accept` \| `/preparing` \| `/ready` \| `/cancel` | staff |
+| POST | `.../orders/{orderId}/complete-pickup` | staff — só `orderType = Pickup` |
 | GET | `/api/admin/orders?establishmentId=&status=` | SUPER_ADMIN |
 
 ## Entregadores
@@ -98,6 +101,7 @@ Convenções gerais, enums e o formato de erro padrão estão em
 |---|---|---|
 | GET | `/api/driver/deliveries/available` | DRIVER |
 | GET | `/api/driver/deliveries/current` | DRIVER |
+| GET | `/api/driver/deliveries/{id}/details` | DRIVER — só o entregador vinculado à entrega |
 | POST | `/api/driver/deliveries/{id}/accept` \| `/pickup` \| `/out-for-delivery` \| `/confirm` | DRIVER |
 | GET | `/api/admin/deliveries?cityId=&status=` | SUPER_ADMIN |
 
