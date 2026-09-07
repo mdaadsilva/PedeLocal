@@ -11,7 +11,17 @@ public enum OrderStatus
     PickedUp,
     OutForDelivery,
     Delivered,
+    /// <summary>Terminal state for PICKUP orders: the customer collected the order directly at the
+    /// establishment. Distinct from <see cref="Delivered"/> (which always means a driver delivery)
+    /// so the two fulfillment paths never collapse into the same status.</summary>
+    PickupCompleted,
     Cancelled
+}
+
+public enum OrderType
+{
+    Delivery,
+    Pickup
 }
 
 public enum PaymentMethod

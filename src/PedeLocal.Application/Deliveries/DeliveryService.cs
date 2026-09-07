@@ -3,8 +3,11 @@ using PedeLocal.Application.Common;
 using PedeLocal.Application.Common.Exceptions;
 using PedeLocal.Application.Common.Interfaces;
 using PedeLocal.Application.Identity;
+using PedeLocal.Contracts.Addresses;
 using PedeLocal.Contracts.Common;
 using PedeLocal.Contracts.Deliveries;
+using PedeLocal.Contracts.Orders;
+using PedeLocal.Domain.Addresses;
 using PedeLocal.Domain.Deliveries;
 using PedeLocal.Domain.Drivers;
 using PedeLocal.Domain.Finance;
@@ -214,6 +217,42 @@ public class DeliveryService(
             "Pedido entregue!", "Seu pedido foi entregue. Bom apetite!", ct: ct);
         return ToResponse(delivery);
     }
+
+    /// <summary>Everything the assigned driver needs to execute the delivery — order items, payment
+    /// method/fee, establishment and delivery address (with lat/lng). Reuses the same ownership
+    /// check as every other driver action (delivery.DriverId == this driver), so a driver with no
+    /// link to the delivery gets the same 403 DELIVERY_ACCESS_DENIED as pickup/confirm/etc.</summary>
+    public async Task<DeliveryDetailResponse> GetDetailsAsync(Guid deliveryId, CancellationToken ct)
+    {
+        var (delivery, order) = await LoadOwnedActiveDeliveryAsync(deliveryId, ct);
+
+        var fullOrder = await db.Orders
+            .Include(o => o.Items).ThenInclude(i => i.Options)
+            .SingleAsync(o => o.Id == order.Id, ct);
+
+        var establishment = await db.Establishments.SingleAsync(e => e.Id == delivery.EstablishmentId, ct);
+        var establishmentAddress = await db.Addresses.SingleAsync(a => a.Id == establishment.AddressId, ct);
+        // Deliveries only ever exist for OrderType.Delivery orders (MarkReadyAsync skips Delivery
+        // creation for Pickup), so AddressId is guaranteed set here.
+        var deliveryAddress = await db.Addresses.SingleAsync(a => a.Id == fullOrder.AddressId!.Value, ct);
+
+        return new DeliveryDetailResponse(
+            delivery.Id,
+            delivery.Status.ToString(),
+            new DeliveryDetailOrderResponse(
+                fullOrder.Id, fullOrder.PaymentMethod.ToString(), fullOrder.PaymentStatus.ToString(), fullOrder.ChangeForAmount,
+                fullOrder.Subtotal, fullOrder.DeliveryFee, fullOrder.Total, fullOrder.Notes,
+                fullOrder.Items.Select(i => new OrderItemResponse(
+                    i.Id, i.ProductId, i.ProductName, i.UnitPrice, i.Quantity, i.LineTotal,
+                    i.Options.Select(o => new OrderItemOptionResponse(o.Id, o.OptionName, o.PriceDelta)).ToList()
+                )).ToList()),
+            new DeliveryDetailEstablishmentResponse(establishment.Id, establishment.Name, establishment.Phone, ToAddressResponse(establishmentAddress)),
+            ToAddressResponse(deliveryAddress));
+    }
+
+    private static AddressResponse ToAddressResponse(Address a) => new(
+        a.Id, a.CityId, a.Type.ToString(), a.Label, a.Street, a.Number, a.District, a.Complement,
+        a.Reference, a.ZipCode, a.PropertyName, a.Road, a.Kilometer, a.Latitude, a.Longitude, a.GooglePlaceId);
 
     private async Task<(Delivery Delivery, Order Order)> LoadOwnedActiveDeliveryAsync(Guid deliveryId, CancellationToken ct)
     {

@@ -36,6 +36,11 @@ public class MerchantOrdersController(OrderService orderService) : ControllerBas
     public async Task<IActionResult> MarkReady(Guid establishmentId, Guid orderId, CancellationToken ct) =>
         Ok(await orderService.MarkReadyAsync(establishmentId, orderId, ct));
 
+    [HttpPost("{orderId:guid}/complete-pickup")]
+    [ProducesResponseType(typeof(OrderResponse), StatusCodes.Status200OK)]
+    public async Task<IActionResult> CompletePickup(Guid establishmentId, Guid orderId, CancellationToken ct) =>
+        Ok(await orderService.CompletePickupAsync(establishmentId, orderId, ct));
+
     [HttpPost("{orderId:guid}/cancel")]
     [ProducesResponseType(typeof(OrderResponse), StatusCodes.Status200OK)]
     public async Task<IActionResult> Cancel(Guid establishmentId, Guid orderId, CancelOrderRequest request, CancellationToken ct) =>

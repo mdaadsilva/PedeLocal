@@ -13,7 +13,7 @@ public class OwnershipSecurityTests
 {
     private static OrderService BuildSut(OrderTestFixture fx, Guid userId) =>
         new(fx.Db, new FakeCurrentUserService(userId), new EstablishmentAccessGuard(fx.Db, new FakeCurrentUserService(userId)),
-            new HaversineDistanceService(), TestTokenService.Create(), new NoOpRealtimeNotifier(), new NoOpNotificationService());
+            new HaversineDistanceService(), TestTokenService.Create(), TestDeliveryCodeCipher.Create(), new NoOpRealtimeNotifier(), new NoOpNotificationService());
 
     [Fact]
     public async Task CustomerCannotAccessAnotherCustomersOrder()
@@ -45,7 +45,7 @@ public class OwnershipSecurityTests
         var fxB = await OrderTestFixture.CreateAsync();
         var staffSutB = new OrderService(fxB.Db, new FakeCurrentUserService(fxB.StaffUserId),
             new EstablishmentAccessGuard(fxB.Db, new FakeCurrentUserService(fxB.StaffUserId)),
-            new HaversineDistanceService(), TestTokenService.Create(), new NoOpRealtimeNotifier(), new NoOpNotificationService());
+            new HaversineDistanceService(), TestTokenService.Create(), TestDeliveryCodeCipher.Create(), new NoOpRealtimeNotifier(), new NoOpNotificationService());
 
         // Merchant B has no staff membership on establishment A at all -> forbidden before the
         // order is even looked up.

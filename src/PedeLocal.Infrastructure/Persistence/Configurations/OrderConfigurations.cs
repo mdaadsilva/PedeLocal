@@ -11,6 +11,7 @@ public class OrderConfiguration : IEntityTypeConfiguration<Order>
         builder.ToTable("orders");
         builder.HasKey(o => o.Id);
         builder.Property(o => o.Status).HasConversion<string>().HasMaxLength(32);
+        builder.Property(o => o.Type).HasConversion<string>().HasMaxLength(16);
         builder.Property(o => o.PaymentMethod).HasConversion<string>().HasMaxLength(32);
         builder.Property(o => o.PaymentStatus).HasConversion<string>().HasMaxLength(32);
         builder.Property(o => o.Subtotal).HasColumnType("numeric(12,2)");
@@ -18,6 +19,7 @@ public class OrderConfiguration : IEntityTypeConfiguration<Order>
         builder.Property(o => o.Total).HasColumnType("numeric(12,2)");
         builder.Property(o => o.ChangeForAmount).HasColumnType("numeric(12,2)");
         builder.Property(o => o.CalculatedDistanceKm).HasColumnType("numeric(9,3)");
+        builder.Property(o => o.Notes).HasMaxLength(1000);
 
         builder.HasIndex(o => o.CustomerUserId);
         builder.HasIndex(o => o.EstablishmentId);

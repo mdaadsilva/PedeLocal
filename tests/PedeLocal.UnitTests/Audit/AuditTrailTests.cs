@@ -116,9 +116,9 @@ public class AuditTrailTests
         var customerUser = new FakeCurrentUserService(fx.CustomerUserId);
         var staffUser = new FakeCurrentUserService(fx.StaffUserId);
         var customerSut = new OrderService(fx.Db, customerUser, new EstablishmentAccessGuard(fx.Db, customerUser),
-            new HaversineDistanceService(), TestTokenService.Create(), new NoOpRealtimeNotifier(), new NoOpNotificationService());
+            new HaversineDistanceService(), TestTokenService.Create(), TestDeliveryCodeCipher.Create(), new NoOpRealtimeNotifier(), new NoOpNotificationService());
         var staffSut = new OrderService(fx.Db, staffUser, new EstablishmentAccessGuard(fx.Db, staffUser),
-            new HaversineDistanceService(), TestTokenService.Create(), new NoOpRealtimeNotifier(), new NoOpNotificationService());
+            new HaversineDistanceService(), TestTokenService.Create(), TestDeliveryCodeCipher.Create(), new NoOpRealtimeNotifier(), new NoOpNotificationService());
 
         var order = await customerSut.CreateAsync(
             new CreateOrderRequest(fx.Establishment.Id, fx.CustomerAddress.Id, "Pix", null,

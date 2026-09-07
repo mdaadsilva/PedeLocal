@@ -25,6 +25,10 @@ public class DriverDeliveriesController(DeliveryService deliveryService) : Contr
         return current is null ? NoContent() : Ok(current);
     }
 
+    [HttpGet("{id:guid}/details")]
+    [ProducesResponseType(typeof(DeliveryDetailResponse), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetDetails(Guid id, CancellationToken ct) => Ok(await deliveryService.GetDetailsAsync(id, ct));
+
     [HttpPost("{id:guid}/accept")]
     [ProducesResponseType(typeof(DeliveryResponse), StatusCodes.Status200OK)]
     public async Task<IActionResult> Accept(Guid id, CancellationToken ct) => Ok(await deliveryService.AcceptAsync(id, ct));

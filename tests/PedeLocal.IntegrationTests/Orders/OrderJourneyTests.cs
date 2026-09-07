@@ -1,12 +1,8 @@
 using System.Net;
 using System.Net.Http.Json;
-using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.DependencyInjection;
-using PedeLocal.Application.Identity;
 using PedeLocal.Contracts.Deliveries;
 using PedeLocal.Contracts.Orders;
 using PedeLocal.IntegrationTests.Infrastructure;
-using PedeLocal.Infrastructure.Persistence;
 using Xunit;
 
 namespace PedeLocal.IntegrationTests.Orders;
@@ -31,15 +27,27 @@ public class OrderJourneyTests : IClassFixture<PedeLocalWebApplicationFactory>
         var customerClient = _factory.CreateClient();
         await customerClient.AsAuthenticatedAsync(scenario.CustomerEmail, IntegrationDataSeeder.Password);
 
-        var createResponse = await customerClient.PostAsJsonAsync("/api/orders", new CreateOrderRequest(
+        var createRequest = new CreateOrderRequest(
             scenario.EstablishmentId, scenario.CustomerAddressId, "Pix", null,
             [new CreateOrderItemRequest(scenario.ProductId, 2, [new CreateOrderItemOptionSelection(scenario.ProductOptionId)])],
-            $"integration-{Guid.NewGuid():N}"));
+            $"integration-{Guid.NewGuid():N}");
+
+        // --- Preview must match what creating the same request actually charges ---
+        var previewResponse = await customerClient.PostAsJsonAsync("/api/orders/preview", createRequest);
+        Assert.Equal(HttpStatusCode.OK, previewResponse.StatusCode);
+        var preview = await previewResponse.Content.ReadFromJsonAsync<OrderPreviewResponse>();
+        Assert.NotNull(preview);
+        Assert.Equal(48m, preview!.Subtotal); // (20 unit + 4 option) * 2
+
+        var createResponse = await customerClient.PostAsJsonAsync("/api/orders", createRequest);
         Assert.Equal(HttpStatusCode.Created, createResponse.StatusCode);
         var order = await createResponse.Content.ReadFromJsonAsync<OrderResponse>();
         Assert.NotNull(order);
         Assert.Equal("Pending", order!.Status);
         Assert.Equal(48m, order.Subtotal); // (20 unit + 4 option) * 2
+        Assert.Equal(preview.Subtotal, order.Subtotal);
+        Assert.Equal(preview.DeliveryFee, order.DeliveryFee);
+        Assert.Equal(preview.Total, order.Total);
 
         // --- Merchant walks the order through accept -> preparing -> ready ---
         var merchantClient = _factory.CreateClient();
@@ -59,6 +67,19 @@ public class OrderJourneyTests : IClassFixture<PedeLocalWebApplicationFactory>
         Assert.Equal(HttpStatusCode.OK, readyResponse.StatusCode);
         Assert.Equal("WaitingDriver", (await readyResponse.Content.ReadFromJsonAsync<OrderResponse>())!.Status);
 
+        // --- Only the order's own customer can read the delivery confirmation code ---
+        var codeResponse = await customerClient.GetAsync($"/api/orders/{order.Id}/delivery-code");
+        Assert.Equal(HttpStatusCode.OK, codeResponse.StatusCode);
+        var codePayload = await codeResponse.Content.ReadFromJsonAsync<DeliveryCodeResponse>();
+        Assert.NotNull(codePayload);
+        Assert.Equal(6, codePayload!.Code.Length);
+
+        var otherCustomerClient = _factory.CreateClient();
+        var otherScenario = await IntegrationDataSeeder.SeedOrderableEstablishmentAsync(_factory);
+        await otherCustomerClient.AsAuthenticatedAsync(otherScenario.CustomerEmail, IntegrationDataSeeder.Password);
+        var forbiddenCodeResponse = await otherCustomerClient.GetAsync($"/api/orders/{order.Id}/delivery-code");
+        Assert.Equal(HttpStatusCode.Forbidden, forbiddenCodeResponse.StatusCode);
+
         // --- Driver sees the delivery, accepts, picks up, heads out ---
         var driverClient = _factory.CreateClient();
         await driverClient.AsAuthenticatedAsync(driverEmail, IntegrationDataSeeder.Password);
@@ -71,32 +92,42 @@ public class OrderJourneyTests : IClassFixture<PedeLocalWebApplicationFactory>
         Assert.Equal(HttpStatusCode.OK, driverAcceptResponse.StatusCode);
         Assert.Equal("Assigned", (await driverAcceptResponse.Content.ReadFromJsonAsync<DeliveryResponse>())!.Status);
 
+        // --- Only the driver assigned to this delivery can see its details ---
+        var detailsResponse = await driverClient.GetAsync($"/api/driver/deliveries/{delivery.Id}/details");
+        Assert.Equal(HttpStatusCode.OK, detailsResponse.StatusCode);
+        var details = await detailsResponse.Content.ReadFromJsonAsync<DeliveryDetailResponse>();
+        Assert.NotNull(details);
+        Assert.Equal(order.Id, details!.Order.Id);
+        Assert.Single(details.Order.Items);
+        Assert.Equal("Pix", details.Order.PaymentMethod);
+        Assert.NotNull(details.DeliveryAddress.Street);
+
+        var (otherDriverEmail, _, _) = await IntegrationDataSeeder.SeedApprovedDriverAsync(_factory, scenario.CityId);
+        var otherDriverClient = _factory.CreateClient();
+        await otherDriverClient.AsAuthenticatedAsync(otherDriverEmail, IntegrationDataSeeder.Password);
+        var forbiddenDetailsResponse = await otherDriverClient.GetAsync($"/api/driver/deliveries/{delivery.Id}/details");
+        Assert.Equal(HttpStatusCode.Forbidden, forbiddenDetailsResponse.StatusCode);
+
         var pickupResponse = await driverClient.PostAsync($"/api/driver/deliveries/{delivery.Id}/pickup", null);
         Assert.Equal("PickedUp", (await pickupResponse.Content.ReadFromJsonAsync<DeliveryResponse>())!.Status);
 
         var outForDeliveryResponse = await driverClient.PostAsync($"/api/driver/deliveries/{delivery.Id}/out-for-delivery", null);
         Assert.Equal("OutForDelivery", (await outForDeliveryResponse.Content.ReadFromJsonAsync<DeliveryResponse>())!.Status);
 
-        // --- Confirmation code: only its hash is ever exposed via the API, so for the test we
-        // overwrite it to a known value directly in the store (same technique as the unit tests). ---
-        const string knownCode = "654321";
-        using (var scope = _factory.CreateDataScope())
-        {
-            var db = scope.ServiceProvider.GetRequiredService<PedeLocalDbContext>();
-            var tokenService = scope.ServiceProvider.GetRequiredService<ITokenService>();
-            var confirmation = await db.DeliveryConfirmations.SingleAsync(c => c.DeliveryId == delivery.Id);
-            confirmation.CodeHash = tokenService.HashToken(knownCode);
-            await db.SaveChangesAsync();
-        }
-
         var wrongCodeResponse = await driverClient.PostAsJsonAsync(
             $"/api/driver/deliveries/{delivery.Id}/confirm", new ConfirmDeliveryRequest("000000"));
         Assert.Equal(HttpStatusCode.BadRequest, wrongCodeResponse.StatusCode);
 
+        // The driver confirms with the exact code the customer retrieved above — proves the
+        // customer-facing decrypted copy and the hash the driver is checked against agree.
         var confirmResponse = await driverClient.PostAsJsonAsync(
-            $"/api/driver/deliveries/{delivery.Id}/confirm", new ConfirmDeliveryRequest(knownCode));
+            $"/api/driver/deliveries/{delivery.Id}/confirm", new ConfirmDeliveryRequest(codePayload.Code));
         Assert.Equal(HttpStatusCode.OK, confirmResponse.StatusCode);
         Assert.Equal("Completed", (await confirmResponse.Content.ReadFromJsonAsync<DeliveryResponse>())!.Status);
+
+        // --- Once confirmed, the code is no longer retrievable ---
+        var usedCodeResponse = await customerClient.GetAsync($"/api/orders/{order.Id}/delivery-code");
+        Assert.Equal(HttpStatusCode.Conflict, usedCodeResponse.StatusCode);
 
         // --- Final state, verified back through the customer's own view of the order ---
         var finalOrderResponse = await customerClient.GetAsync($"/api/orders/{order.Id}");
