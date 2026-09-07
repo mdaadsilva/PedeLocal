@@ -21,19 +21,19 @@ class OrderStatusTimeline extends StatelessWidget {
     }
 
     final historyByStatus = {for (final h in order.statusHistory) h.status: h};
-    final currentIndex = Order.deliveryLifecycle.indexOf(order.status);
+    final steps = order.lifecycle;
+    final currentIndex = steps.indexOf(order.status);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        for (var i = 0; i < Order.deliveryLifecycle.length; i++)
+        for (var i = 0; i < steps.length; i++)
           _TimelineStep(
-            label: Order.deliveryLifecycle[i].orderStatusLabel,
-            changedAtUtc:
-                historyByStatus[Order.deliveryLifecycle[i]]?.changedAtUtc,
-            isCompleted: i <= currentIndex,
+            label: steps[i].orderStatusLabel,
+            changedAtUtc: historyByStatus[steps[i]]?.changedAtUtc,
+            isCompleted: currentIndex >= 0 && i <= currentIndex,
             isCurrent: i == currentIndex,
-            isLast: i == Order.deliveryLifecycle.length - 1,
+            isLast: i == steps.length - 1,
           ),
       ],
     );

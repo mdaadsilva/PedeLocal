@@ -13,7 +13,9 @@ import '../../../core/widgets/pedelocal_card.dart';
 import '../../addresses/application/addresses_controller.dart';
 import '../../addresses/domain/address.dart';
 import '../../establishments/application/establishment_lookup_provider.dart';
+import '../application/delivery_code_controller.dart';
 import '../application/order_tracking_controller.dart';
+import '../domain/delivery_code.dart';
 import '../domain/order.dart';
 import 'widgets/order_status_timeline.dart';
 
@@ -90,7 +92,7 @@ class _OrderTrackingBody extends ConsumerWidget {
               ),
               const SizedBox(height: AppSpacing.xxs),
               Text(
-                'Feito em ${Formatters.dateTime(order.createdAtUtc)}',
+                '${order.isPickup ? 'Retirada' : 'Entrega'} · ${Formatters.dateTime(order.createdAtUtc)}',
                 style: AppTypography.bodyMuted,
               ),
             ],
@@ -100,7 +102,11 @@ class _OrderTrackingBody extends ConsumerWidget {
         PedeLocalCard(child: OrderStatusTimeline(order: order)),
         if (order.shouldShowDeliveryCodeNotice) ...[
           const SizedBox(height: AppSpacing.lg),
-          const _DeliveryCodeNotice(),
+          _DeliveryCodeCard(orderId: order.id),
+        ],
+        if (order.shouldShowPickupReadyNotice) ...[
+          const SizedBox(height: AppSpacing.lg),
+          const _PickupReadyNotice(),
         ],
         const SizedBox(height: AppSpacing.lg),
         Text('Itens', style: AppTypography.title),
@@ -122,12 +128,12 @@ class _OrderTrackingBody extends ConsumerWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                order.paymentMethod.paymentMethodLabel,
+                order.paymentMethod.paymentMethodLabel(isPickup: order.isPickup),
                 style: AppTypography.body,
               ),
               const SizedBox(height: AppSpacing.xxs),
               Text(
-                order.paymentStatus.paymentStatusLabel,
+                order.paymentStatus.paymentStatusLabel(isPickup: order.isPickup),
                 style: AppTypography.bodyMuted,
               ),
               if (order.changeForAmount != null) ...[
@@ -140,17 +146,35 @@ class _OrderTrackingBody extends ConsumerWidget {
             ],
           ),
         ),
+        if (order.notes != null && order.notes!.isNotEmpty) ...[
+          const SizedBox(height: AppSpacing.lg),
+          Text('Observações', style: AppTypography.title),
+          const SizedBox(height: AppSpacing.sm),
+          PedeLocalCard(
+            child: Text(order.notes!, style: AppTypography.body),
+          ),
+        ],
         const SizedBox(height: AppSpacing.lg),
-        Text('Endereço de entrega', style: AppTypography.title),
+        Text(
+          order.isPickup ? 'Retirada' : 'Endereço de entrega',
+          style: AppTypography.title,
+        ),
         const SizedBox(height: AppSpacing.sm),
         PedeLocalCard(
           child: Row(
             children: [
-              const Icon(Icons.location_on_outlined, color: AppColors.primary),
+              Icon(
+                order.isPickup
+                    ? Icons.storefront_outlined
+                    : Icons.location_on_outlined,
+                color: AppColors.primary,
+              ),
               const SizedBox(width: AppSpacing.sm),
               Expanded(
                 child: Text(
-                  address?.summary ?? 'Endereço não disponível',
+                  order.isPickup
+                      ? 'Retire em ${establishmentAsync.value?.name ?? 'o estabelecimento'}'
+                      : (address?.summary ?? 'Endereço não disponível'),
                   style: AppTypography.body,
                 ),
               ),
@@ -219,7 +243,10 @@ class _TotalsSection extends StatelessWidget {
     return Column(
       children: [
         _TotalRow(label: 'Subtotal', value: order.subtotal),
-        _TotalRow(label: 'Taxa de entrega', value: order.deliveryFee),
+        _TotalRow(
+          label: 'Taxa de entrega',
+          value: order.isPickup ? 0 : order.deliveryFee,
+        ),
         const SizedBox(height: AppSpacing.xs),
         _TotalRow(label: 'Total', value: order.total, isEmphasis: true),
       ],
@@ -254,11 +281,53 @@ class _TotalRow extends StatelessWidget {
   }
 }
 
-class _DeliveryCodeNotice extends StatelessWidget {
-  const _DeliveryCodeNotice();
+class _PickupReadyNotice extends StatelessWidget {
+  const _PickupReadyNotice();
 
   @override
   Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(AppSpacing.md),
+      decoration: BoxDecoration(
+        color: AppColors.primaryLight,
+        borderRadius: AppRadius.radiusLg,
+      ),
+      child: const Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.storefront_outlined, color: AppColors.primary),
+              SizedBox(width: AppSpacing.sm),
+              Expanded(
+                child: Text(
+                  'Pronto para retirada',
+                  style: AppTypography.subtitle,
+                ),
+              ),
+            ],
+          ),
+          SizedBox(height: AppSpacing.sm),
+          Text(
+            'Seu pedido está pronto. Retire no estabelecimento. '
+            'Não há entregador nem código de confirmação neste fluxo.',
+            style: AppTypography.body,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _DeliveryCodeCard extends ConsumerWidget {
+  const _DeliveryCodeCard({required this.orderId});
+
+  final String orderId;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final codeAsync = ref.watch(deliveryCodeControllerProvider(orderId));
+
     return Container(
       padding: const EdgeInsets.all(AppSpacing.md),
       decoration: BoxDecoration(
@@ -266,10 +335,10 @@ class _DeliveryCodeNotice extends StatelessWidget {
         borderRadius: AppRadius.radiusLg,
         border: Border.all(color: AppColors.accent.withValues(alpha: 0.4)),
       ),
-      child: const Column(
+      child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
+          const Row(
             children: [
               Icon(Icons.lock_outline_rounded, color: AppColors.accent),
               SizedBox(width: AppSpacing.sm),
@@ -281,17 +350,60 @@ class _DeliveryCodeNotice extends StatelessWidget {
               ),
             ],
           ),
-          SizedBox(height: AppSpacing.sm),
-          Text(
+          const SizedBox(height: AppSpacing.sm),
+          const Text(
             'Informe este código ao entregador somente após receber seu pedido.',
             style: AppTypography.body,
           ),
-          SizedBox(height: AppSpacing.xs),
-          Text(
-            'O código de 6 dígitos é gerado quando o pedido fica pronto. '
-            'O aplicativo ainda não recebe o número do servidor — o entregador '
-            'vai pedi-lo a você no momento da entrega.',
-            style: AppTypography.caption,
+          const SizedBox(height: AppSpacing.sm),
+          codeAsync.when(
+            data: (DeliveryCode code) => Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  code.code,
+                  style: AppTypography.title.copyWith(
+                    letterSpacing: 4,
+                    fontSize: 28,
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.xxs),
+                Text(
+                  'Válido até ${Formatters.dateTime(code.expiresAtUtc)}',
+                  style: AppTypography.caption,
+                ),
+              ],
+            ),
+            loading: () => const Padding(
+              padding: EdgeInsets.symmetric(vertical: AppSpacing.sm),
+              child: LoadingIndicator(),
+            ),
+            error: (error, stackTrace) {
+              final exception = error is AppException ? error : null;
+              final message = switch (exception?.code) {
+                'DELIVERY_CODE_NOT_FOUND' =>
+                  'O código ainda não está disponível.',
+                'DELIVERY_CODE_EXPIRED' =>
+                  'Este código expirou. Fale com o estabelecimento.',
+                'DELIVERY_CODE_ALREADY_USED' =>
+                  'A entrega já foi confirmada com este código.',
+                _ =>
+                  exception?.message ??
+                      'Não foi possível carregar o código de confirmação.',
+              };
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(message, style: AppTypography.bodyMuted),
+                  TextButton(
+                    onPressed: () => ref
+                        .read(deliveryCodeControllerProvider(orderId).notifier)
+                        .refresh(),
+                    child: const Text('Tentar novamente'),
+                  ),
+                ],
+              );
+            },
           ),
         ],
       ),
@@ -300,18 +412,20 @@ class _DeliveryCodeNotice extends StatelessWidget {
 }
 
 extension on String {
-  String get paymentMethodLabel => switch (this) {
+  String paymentMethodLabel({required bool isPickup}) => switch (this) {
     'Pix' => 'Pix',
     'Cash' => 'Dinheiro',
-    'DebitOnDelivery' => 'Débito na entrega',
-    'CreditOnDelivery' => 'Crédito na entrega',
+    'DebitOnDelivery' =>
+      isPickup ? 'Débito na retirada' : 'Débito na entrega',
+    'CreditOnDelivery' =>
+      isPickup ? 'Crédito na retirada' : 'Crédito na entrega',
     _ => this,
   };
 
-  String get paymentStatusLabel => switch (this) {
+  String paymentStatusLabel({required bool isPickup}) => switch (this) {
     'Pending' => 'Pagamento pendente',
     'Paid' => 'Pagamento confirmado',
-    'NotApplicable' => 'Pago na entrega',
+    'NotApplicable' => isPickup ? 'Pago na retirada' : 'Pago na entrega',
     _ => this,
   };
 }

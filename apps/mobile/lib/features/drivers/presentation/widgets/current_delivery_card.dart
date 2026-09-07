@@ -1,28 +1,30 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../../core/maps/maps_launcher.dart';
+import '../../../../core/network/app_exception.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_spacing.dart';
 import '../../../../core/theme/app_typography.dart';
+import '../../../../core/utils/formatters.dart';
 import '../../../../core/widgets/pedelocal_button.dart';
 import '../../../../core/widgets/pedelocal_card.dart';
 import '../../../../core/widgets/pedelocal_text_field.dart';
+import '../../../addresses/domain/address.dart';
+import '../../application/delivery_details_controller.dart';
 import '../../domain/delivery.dart';
+import '../../domain/delivery_detail.dart';
 import 'delivery_tile.dart';
 
-/// Card da entrega ativa do entregador (`status == BUSY`).
+/// Card da entrega ativa (`status == BUSY`).
 ///
-/// Mostra a ação correta para o status atual da entrega
-/// (`docs/DELIVERY_FLOW.md#retirar-sair-para-entrega-confirmar`):
-/// - `Assigned` → marcar retirada no estabelecimento;
-/// - `PickedUp` → marcar saída para entrega;
-/// - `OutForDelivery` → informar o código de 6 dígitos (recebido
-///   verbalmente do cliente) para concluir.
+/// Ações por status (`docs/DELIVERY_FLOW.md`):
+/// - `Assigned` → retirada no estabelecimento;
+/// - `PickedUp` → saída para entrega;
+/// - `OutForDelivery` → confirmar código de 6 dígitos.
 ///
-/// IMPORTANTE: `DeliveryResponse` não traz endereço do estabelecimento,
-/// endereço do cliente nem os itens do pedido — por isso não há botão
-/// "Abrir rota" nem lista de itens aqui. Isso é uma pendência documentada
-/// do backend, não uma omissão do frontend.
-class CurrentDeliveryCard extends StatefulWidget {
+/// Detalhes vêm de `GET /api/driver/deliveries/{id}/details`.
+class CurrentDeliveryCard extends ConsumerStatefulWidget {
   const CurrentDeliveryCard({
     super.key,
     required this.delivery,
@@ -39,10 +41,11 @@ class CurrentDeliveryCard extends StatefulWidget {
   final ValueChanged<String> onConfirm;
 
   @override
-  State<CurrentDeliveryCard> createState() => _CurrentDeliveryCardState();
+  ConsumerState<CurrentDeliveryCard> createState() =>
+      _CurrentDeliveryCardState();
 }
 
-class _CurrentDeliveryCardState extends State<CurrentDeliveryCard> {
+class _CurrentDeliveryCardState extends ConsumerState<CurrentDeliveryCard> {
   final _codeController = TextEditingController();
 
   @override
@@ -53,8 +56,24 @@ class _CurrentDeliveryCardState extends State<CurrentDeliveryCard> {
 
   String get _shortId => widget.delivery.id.split('-').first;
 
+  Future<void> _openRoute(Address address) async {
+    final opened = await MapsLauncher.openRoute(
+      address.latitude,
+      address.longitude,
+    );
+    if (!opened && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Não foi possível abrir o mapa.')),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    final detailsAsync = ref.watch(
+      deliveryDetailsControllerProvider(widget.delivery.id),
+    );
+
     return PedeLocalCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -90,6 +109,45 @@ class _CurrentDeliveryCardState extends State<CurrentDeliveryCard> {
             ],
           ),
           const SizedBox(height: AppSpacing.md),
+          detailsAsync.when(
+            data: (details) => _DeliveryDetailsBody(
+              details: details,
+              onOpenEstablishmentRoute: () =>
+                  _openRoute(details.establishment.address),
+              onOpenDeliveryRoute: () => _openRoute(details.deliveryAddress),
+            ),
+            loading: () => const Padding(
+              padding: EdgeInsets.symmetric(vertical: AppSpacing.sm),
+              child: Center(
+                child: SizedBox(
+                  width: 22,
+                  height: 22,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+              ),
+            ),
+            error: (error, stackTrace) {
+              final message = error is AppException
+                  ? error.message
+                  : 'Não foi possível carregar os detalhes da entrega.';
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(message, style: AppTypography.bodyMuted),
+                  TextButton(
+                    onPressed: () => ref
+                        .read(
+                          deliveryDetailsControllerProvider(
+                            widget.delivery.id,
+                          ).notifier,
+                        )
+                        .refresh(),
+                    child: const Text('Tentar novamente'),
+                  ),
+                ],
+              );
+            },
+          ),
           ..._buildAction(),
         ],
       ),
@@ -176,4 +234,94 @@ class _CurrentDeliveryCardState extends State<CurrentDeliveryCard> {
         return const [];
     }
   }
+}
+
+class _DeliveryDetailsBody extends StatelessWidget {
+  const _DeliveryDetailsBody({
+    required this.details,
+    required this.onOpenEstablishmentRoute,
+    required this.onOpenDeliveryRoute,
+  });
+
+  final DeliveryDetail details;
+  final VoidCallback onOpenEstablishmentRoute;
+  final VoidCallback onOpenDeliveryRoute;
+
+  @override
+  Widget build(BuildContext context) {
+    final order = details.order;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(details.establishment.name, style: AppTypography.subtitle),
+        const SizedBox(height: AppSpacing.xxs),
+        Text(details.establishment.phone, style: AppTypography.bodyMuted),
+        const SizedBox(height: AppSpacing.xs),
+        Text(
+          details.establishment.address.summary,
+          style: AppTypography.bodyMuted,
+        ),
+        const SizedBox(height: AppSpacing.sm),
+        PedeLocalButton(
+          label: 'Rota até o estabelecimento',
+          icon: Icons.storefront_outlined,
+          variant: PedeLocalButtonVariant.secondary,
+          onPressed: onOpenEstablishmentRoute,
+        ),
+        const SizedBox(height: AppSpacing.md),
+        Text('Entregar em', style: AppTypography.subtitle),
+        const SizedBox(height: AppSpacing.xxs),
+        Text(details.deliveryAddress.summary, style: AppTypography.body),
+        const SizedBox(height: AppSpacing.sm),
+        PedeLocalButton(
+          label: 'Abrir rota até o cliente',
+          icon: Icons.map_outlined,
+          variant: PedeLocalButtonVariant.secondary,
+          onPressed: onOpenDeliveryRoute,
+        ),
+        const SizedBox(height: AppSpacing.md),
+        Text('Itens', style: AppTypography.subtitle),
+        const SizedBox(height: AppSpacing.xs),
+        for (final item in order.items)
+          Padding(
+            padding: const EdgeInsets.only(bottom: AppSpacing.xs),
+            child: Text(
+              '${item.quantity}x ${item.productName}'
+              '${item.options.isEmpty ? '' : ' (${item.options.map((o) => o.optionName).join(', ')})'}',
+              style: AppTypography.body,
+            ),
+          ),
+        const SizedBox(height: AppSpacing.sm),
+        Text(
+          'Pagamento: ${order.paymentMethod.driverPaymentLabel}',
+          style: AppTypography.body,
+        ),
+        if (order.changeForAmount != null)
+          Text(
+            'Troco para ${Formatters.currency(order.changeForAmount!)}',
+            style: AppTypography.bodyMuted,
+          ),
+        Text(
+          'Total ${Formatters.currency(order.total)} · taxa ${Formatters.currency(order.deliveryFee)}',
+          style: AppTypography.bodyMuted,
+        ),
+        if (order.notes != null && order.notes!.isNotEmpty) ...[
+          const SizedBox(height: AppSpacing.sm),
+          Text('Observações', style: AppTypography.subtitle),
+          const SizedBox(height: AppSpacing.xxs),
+          Text(order.notes!, style: AppTypography.body),
+        ],
+      ],
+    );
+  }
+}
+
+extension on String {
+  String get driverPaymentLabel => switch (this) {
+    'Pix' => 'Pix',
+    'Cash' => 'Dinheiro',
+    'DebitOnDelivery' => 'Débito na entrega',
+    'CreditOnDelivery' => 'Crédito na entrega',
+    _ => this,
+  };
 }

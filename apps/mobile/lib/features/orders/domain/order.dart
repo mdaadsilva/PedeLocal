@@ -4,19 +4,18 @@ import 'package:equatable/equatable.dart';
 /// para criação, detalhe (`GET /api/orders/{id}`) e listagem
 /// (`GET /api/orders`), conforme `docs/API_CONTRACT.md`/`docs/ORDER_FLOW.md`.
 ///
-/// Importante: este DTO **não** inclui dados do estabelecimento (só
-/// `establishmentId`), do endereço (só `addressId`), nem do entregador —
-/// resolvidos separadamente pela UI a partir de outros endpoints já
-/// autorizados para o cliente (ver pendências da Etapa 2 quanto a dados do
-/// entregador, que o backend não expõe ao cliente).
+/// `type` é `Delivery` ou `Pickup`. `addressId` é `null` em retirada.
+/// O código de confirmação não vem neste DTO — use
+/// `GET /api/orders/{id}/delivery-code`.
 class Order extends Equatable {
   const Order({
     required this.id,
     required this.customerUserId,
     required this.establishmentId,
     required this.cityId,
-    required this.addressId,
+    this.addressId,
     required this.status,
+    this.type = 'Delivery',
     required this.paymentMethod,
     required this.paymentStatus,
     this.changeForAmount,
@@ -24,6 +23,7 @@ class Order extends Equatable {
     required this.deliveryFee,
     required this.total,
     this.calculatedDistanceKm,
+    this.notes,
     required this.createdAtUtc,
     required this.items,
     required this.statusHistory,
@@ -33,11 +33,16 @@ class Order extends Equatable {
   final String customerUserId;
   final String establishmentId;
   final String cityId;
-  final String addressId;
+
+  /// Obrigatório em `Delivery`; `null` em `Pickup`.
+  final String? addressId;
 
   /// `Pending, Accepted, Preparing, Ready, WaitingDriver, DriverAssigned,
-  /// PickedUp, OutForDelivery, Delivered, Cancelled`.
+  /// PickedUp, OutForDelivery, Delivered, PickupCompleted, Cancelled`.
   final String status;
+
+  /// `Delivery | Pickup` (`docs/ORDER_FLOW.md`).
+  final String type;
 
   /// `Pix, Cash, DebitOnDelivery, CreditOnDelivery`.
   final String paymentMethod;
@@ -49,24 +54,33 @@ class Order extends Equatable {
   final double deliveryFee;
   final double total;
   final double? calculatedDistanceKm;
+  final String? notes;
   final DateTime createdAtUtc;
   final List<OrderItem> items;
   final List<OrderStatusHistoryEntry> statusHistory;
 
+  bool get isDelivery => type == 'Delivery';
+  bool get isPickup => type == 'Pickup';
   bool get isCancelled => status == 'Cancelled';
   bool get isDelivered => status == 'Delivered';
-  bool get isActive => !isCancelled && !isDelivered;
+  bool get isPickupCompleted => status == 'PickupCompleted';
+  bool get isCompleted => isDelivered || isPickupCompleted;
+  bool get isActive => !isCancelled && !isCompleted;
 
-  /// O código de 6 dígitos é gerado em `READY`, mas o backend **não o
-  /// expõe** ao cliente (só o hash — `docs/ORDER_FLOW.md`). A UI mostra o
-  /// aviso a partir deste estágio até a entrega, sem inventar o número.
-  bool get shouldShowDeliveryCodeNotice => const {
-    'Ready',
-    'WaitingDriver',
-    'DriverAssigned',
-    'PickedUp',
-    'OutForDelivery',
-  }.contains(status);
+  /// Código de 6 dígitos só existe em `Delivery` a partir de `READY`
+  /// (`GET /api/orders/{id}/delivery-code` — `docs/DELIVERY_FLOW.md`).
+  /// `Pickup` nunca gera código.
+  bool get shouldShowDeliveryCodeNotice =>
+      isDelivery &&
+      const {
+        'Ready',
+        'WaitingDriver',
+        'DriverAssigned',
+        'PickedUp',
+        'OutForDelivery',
+      }.contains(status);
+
+  bool get shouldShowPickupReadyNotice => isPickup && status == 'Ready';
 
   static const List<String> deliveryLifecycle = [
     'Pending',
@@ -80,14 +94,25 @@ class Order extends Equatable {
     'Delivered',
   ];
 
+  static const List<String> pickupLifecycle = [
+    'Pending',
+    'Accepted',
+    'Preparing',
+    'Ready',
+    'PickupCompleted',
+  ];
+
+  List<String> get lifecycle => isPickup ? pickupLifecycle : deliveryLifecycle;
+
   factory Order.fromJson(Map<String, dynamic> json) {
     return Order(
       id: json['id'] as String,
       customerUserId: json['customerUserId'] as String,
       establishmentId: json['establishmentId'] as String,
       cityId: json['cityId'] as String,
-      addressId: json['addressId'] as String,
+      addressId: json['addressId'] as String?,
       status: json['status'] as String,
+      type: json['type'] as String? ?? 'Delivery',
       paymentMethod: json['paymentMethod'] as String,
       paymentStatus: json['paymentStatus'] as String,
       changeForAmount: (json['changeForAmount'] as num?)?.toDouble(),
@@ -95,6 +120,7 @@ class Order extends Equatable {
       deliveryFee: (json['deliveryFee'] as num).toDouble(),
       total: (json['total'] as num).toDouble(),
       calculatedDistanceKm: (json['calculatedDistanceKm'] as num?)?.toDouble(),
+      notes: json['notes'] as String?,
       createdAtUtc: DateTime.parse(json['createdAtUtc'] as String),
       items: (json['items'] as List<dynamic>? ?? const [])
           .map((e) => OrderItem.fromJson(e as Map<String, dynamic>))
@@ -111,12 +137,29 @@ class Order extends Equatable {
   List<Object?> get props => [
     id,
     status,
+    type,
     paymentStatus,
     subtotal,
     deliveryFee,
     total,
+    notes,
     items,
   ];
+}
+
+/// `Order.type` — `Delivery` (padrão) ou `Pickup`.
+enum OrderFulfillmentType { delivery, pickup }
+
+extension OrderFulfillmentTypeApi on OrderFulfillmentType {
+  String get apiValue => switch (this) {
+    OrderFulfillmentType.delivery => 'Delivery',
+    OrderFulfillmentType.pickup => 'Pickup',
+  };
+
+  String get label => switch (this) {
+    OrderFulfillmentType.delivery => 'Entrega',
+    OrderFulfillmentType.pickup => 'Retirada no estabelecimento',
+  };
 }
 
 class OrderItem extends Equatable {
@@ -197,11 +240,15 @@ extension PaymentMethodOptionApi on PaymentMethodOption {
     PaymentMethodOption.creditOnDelivery => 'CreditOnDelivery',
   };
 
-  String get label => switch (this) {
+  String get label => labelFor(isPickup: false);
+
+  String labelFor({required bool isPickup}) => switch (this) {
     PaymentMethodOption.pix => 'Pix',
     PaymentMethodOption.cash => 'Dinheiro',
-    PaymentMethodOption.debitOnDelivery => 'Débito na entrega',
-    PaymentMethodOption.creditOnDelivery => 'Crédito na entrega',
+    PaymentMethodOption.debitOnDelivery =>
+      isPickup ? 'Débito na retirada' : 'Débito na entrega',
+    PaymentMethodOption.creditOnDelivery =>
+      isPickup ? 'Crédito na retirada' : 'Crédito na entrega',
   };
 }
 
@@ -218,6 +265,7 @@ extension OrderStatusLabel on String {
     'PickedUp' => 'Entregador retirou o pedido',
     'OutForDelivery' => 'Saiu para entrega',
     'Delivered' => 'Entregue',
+    'PickupCompleted' => 'Retirado no estabelecimento',
     'Cancelled' => 'Cancelado',
     _ => this,
   };

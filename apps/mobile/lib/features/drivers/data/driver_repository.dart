@@ -4,16 +4,16 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/network/api_client.dart';
 import '../../../core/network/app_exception.dart';
 import '../domain/delivery.dart';
+import '../domain/delivery_detail.dart';
 import '../domain/driver_profile.dart';
 import '../domain/driver_receivable.dart';
 
 /// `docs/API_CONTRACT.md#entregadores`, `docs/API_CONTRACT.md#entregas`,
 /// `docs/DELIVERY_FLOW.md`.
 ///
-/// IMPORTANTE: `DeliveryResponse` (contrato real do backend) não inclui
-/// endereço do estabelecimento, endereço do cliente nem os itens do pedido —
-/// apenas IDs e status. Por isso este repositório nunca inventa esses campos;
-/// a tela do entregador mostra apenas o que a API de fato retorna.
+/// `DeliveryResponse` (lista/atual) traz só IDs e status. Detalhes
+/// completos vêm de `GET /api/driver/deliveries/{id}/details` após o
+/// aceite — só o entregador vinculado.
 class DriverRepository {
   DriverRepository(this._dio);
 
@@ -61,6 +61,18 @@ class DriverRepository {
       return response.data!
           .map((e) => Delivery.fromJson(e as Map<String, dynamic>))
           .toList(growable: false);
+    } on DioException catch (e) {
+      throw AppException.fromDioException(e);
+    }
+  }
+
+  /// `GET /api/driver/deliveries/{id}/details` — só o entregador da entrega.
+  Future<DeliveryDetail> getDeliveryDetails(String deliveryId) async {
+    try {
+      final response = await _dio.get<Map<String, dynamic>>(
+        '/api/driver/deliveries/$deliveryId/details',
+      );
+      return DeliveryDetail.fromJson(response.data!);
     } on DioException catch (e) {
       throw AppException.fromDioException(e);
     }
