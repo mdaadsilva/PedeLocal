@@ -4,7 +4,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/network/api_client.dart';
 import '../../../core/network/app_exception.dart';
 import '../../../core/network/paged_result.dart';
+import '../domain/delivery_code.dart';
 import '../domain/order.dart';
+import '../domain/order_preview.dart';
 
 /// Item de pedido a ser criado — espelha `CreateOrderItemRequest`.
 class CreateOrderItem {
@@ -31,28 +33,86 @@ class OrdersRepository {
 
   final Dio _dio;
 
+  Map<String, dynamic> _payload({
+    required String establishmentId,
+    String? addressId,
+    required String paymentMethod,
+    double? changeForAmount,
+    required List<CreateOrderItem> items,
+    String? idempotencyKey,
+    required String orderType,
+    String? notes,
+  }) {
+    return {
+      'establishmentId': establishmentId,
+      'addressId': addressId,
+      'paymentMethod': paymentMethod,
+      'changeForAmount': changeForAmount,
+      'items': items.map((i) => i.toJson()).toList(),
+      'idempotencyKey': idempotencyKey,
+      'orderType': orderType,
+      'notes': notes,
+    };
+  }
+
+  /// `POST /api/orders/preview` — mesma validação/cálculo de
+  /// `POST /api/orders`, sem persistir (`docs/ORDER_FLOW.md#preview`).
+  Future<OrderPreview> preview({
+    required String establishmentId,
+    String? addressId,
+    required String paymentMethod,
+    double? changeForAmount,
+    required List<CreateOrderItem> items,
+    required String orderType,
+    String? notes,
+  }) async {
+    try {
+      final response = await _dio.post<Map<String, dynamic>>(
+        '/api/orders/preview',
+        data: _payload(
+          establishmentId: establishmentId,
+          addressId: addressId,
+          paymentMethod: paymentMethod,
+          changeForAmount: changeForAmount,
+          items: items,
+          orderType: orderType,
+          notes: notes,
+        ),
+      );
+      return OrderPreview.fromJson(response.data!);
+    } on DioException catch (e) {
+      throw AppException.fromDioException(e);
+    }
+  }
+
   /// `POST /api/orders`. [idempotencyKey] deve ser o mesmo em caso de retry
-  /// do mesmo pedido lógico (protege contra duplo-submit em conexão
-  /// instável — `docs/FRONTEND_GUIDE.md#idempotência`).
+  /// do mesmo pedido lógico (`docs/FRONTEND_GUIDE.md#idempotência`).
+  ///
+  /// `orderType = Pickup`: [addressId] deve ser `null`.
+  /// `orderType = Delivery`: [addressId] é obrigatório.
   Future<Order> create({
     required String establishmentId,
-    required String addressId,
+    String? addressId,
     required String paymentMethod,
     double? changeForAmount,
     required List<CreateOrderItem> items,
     required String idempotencyKey,
+    String orderType = 'Delivery',
+    String? notes,
   }) async {
     try {
       final response = await _dio.post<Map<String, dynamic>>(
         '/api/orders',
-        data: {
-          'establishmentId': establishmentId,
-          'addressId': addressId,
-          'paymentMethod': paymentMethod,
-          'changeForAmount': changeForAmount,
-          'items': items.map((i) => i.toJson()).toList(),
-          'idempotencyKey': idempotencyKey,
-        },
+        data: _payload(
+          establishmentId: establishmentId,
+          addressId: addressId,
+          paymentMethod: paymentMethod,
+          changeForAmount: changeForAmount,
+          items: items,
+          idempotencyKey: idempotencyKey,
+          orderType: orderType,
+          notes: notes,
+        ),
       );
       return Order.fromJson(response.data!);
     } on DioException catch (e) {
@@ -79,6 +139,19 @@ class OrdersRepository {
     try {
       final response = await _dio.get<Map<String, dynamic>>('/api/orders/$id');
       return Order.fromJson(response.data!);
+    } on DioException catch (e) {
+      throw AppException.fromDioException(e);
+    }
+  }
+
+  /// `GET /api/orders/{id}/delivery-code` — só o dono do pedido.
+  /// O código fica só em memória (Riverpod); nunca logar o valor.
+  Future<DeliveryCode> getDeliveryCode(String orderId) async {
+    try {
+      final response = await _dio.get<Map<String, dynamic>>(
+        '/api/orders/$orderId/delivery-code',
+      );
+      return DeliveryCode.fromJson(response.data!);
     } on DioException catch (e) {
       throw AppException.fromDioException(e);
     }

@@ -1,0 +1,282 @@
+---
+description: Fluxo Git obrigatório do projeto PedeLocal
+alwaysApply: true
+---
+
+# Git Workflow — PedeLocal
+
+Sempre siga estas regras ao trabalhar neste repositório.
+
+## Regra principal
+
+NUNCA implementar features, correções ou refactors diretamente na branch `main`.
+
+O fluxo obrigatório é:
+
+main
+→ nova branch
+→ implementação
+→ validação
+→ commit
+→ push
+→ Pull Request para main
+→ PARAR
+
+O usuário fará o merge manualmente pelo GitHub.
+
+---
+
+## Antes de iniciar uma nova tarefa
+
+Antes de modificar arquivos:
+
+1. Verifique a branch atual:
+
+   git status
+   git branch --show-current
+
+2. Caso esteja iniciando uma NOVA tarefa e não existam alterações locais pendentes:
+
+   git switch main
+   git pull origin main
+
+3. Crie uma branch descritiva.
+
+Use:
+
+- feat/<nome> para funcionalidades
+- fix/<nome> para correções
+- refactor/<nome> para refactors
+- docs/<nome> para documentação
+- test/<nome> para testes
+- chore/<nome> para infraestrutura/configuração
+
+Exemplos:
+
+feat/mobile-checkout
+feat/driver-delivery-flow
+fix/flutter-auth-redirect
+fix/android-build
+docs/api-contract
+
+Nunca use nomes genéricos como:
+
+feature1
+teste
+nova
+branch2
+
+---
+
+## Alterações existentes
+
+Se já existirem alterações locais antes da criação da branch:
+
+NÃO descarte nenhuma alteração.
+
+Crie a nova branch preservando o working tree:
+
+git switch -c <nome-da-branch>
+
+Nunca execute comandos destrutivos para "limpar" essas alterações.
+
+---
+
+## Durante a implementação
+
+Faça somente alterações relacionadas à tarefa solicitada.
+
+Não faça refactors grandes ou mudanças não solicitadas sem necessidade.
+
+Não altere backend quando a tarefa for exclusivamente frontend.
+
+Não altere frontend quando a tarefa for exclusivamente backend, salvo dependência técnica claramente necessária.
+
+---
+
+## Validação Flutter
+
+Quando houver alterações em `apps/mobile`, antes do commit execute:
+
+flutter analyze
+flutter test
+
+Ambos devem passar.
+
+Não use `flutter run` automaticamente se o usuário estiver controlando o emulador manualmente.
+
+O usuário pode executar o app no emulador pelo PowerShell.
+
+Se um teste ou análise falhar:
+
+1. identifique a causa;
+2. corrija;
+3. execute novamente;
+4. somente continue para commit quando estiver válido.
+
+---
+
+## Validação Backend
+
+Quando houver alterações no backend .NET:
+
+execute os testes existentes e o build apropriado antes do commit.
+
+Não faça commit de código que não compila.
+
+---
+
+## Segurança antes do commit
+
+Antes de adicionar arquivos ao Git:
+
+git status
+
+Revise os arquivos modificados.
+
+NUNCA commitar:
+
+- .env
+- senhas
+- tokens
+- secrets
+- credenciais
+- certificados privados
+- arquivos locais de SDK
+- caches
+- arquivos de build desnecessários
+- credenciais Firebase privadas
+- configurações específicas da máquina do usuário
+
+Use `git add` somente nos arquivos relacionados à tarefa.
+
+Evite `git add .` quando houver arquivos não relacionados.
+
+---
+
+## Commit
+
+Use Conventional Commits.
+
+Exemplos:
+
+feat: implement customer checkout flow
+
+fix: correct Android compile SDK configuration
+
+test: add mobile authentication tests
+
+docs: document delivery confirmation flow
+
+chore: update Flutter Android configuration
+
+Faça commits claros e relacionados à tarefa.
+
+---
+
+## Push
+
+Após validação e commit:
+
+git push -u origin <nome-da-branch>
+
+Nunca:
+
+git push --force
+
+Nunca envie diretamente para `main`.
+
+---
+
+## Pull Request
+
+Após o push, crie um Pull Request utilizando GitHub CLI.
+
+Exemplo:
+
+gh pr create --base main --head <branch>
+
+O título deve ser objetivo.
+
+A descrição deve conter:
+
+## Resumo
+O que foi implementado.
+
+## Principais alterações
+Áreas e funcionalidades modificadas.
+
+## Validação
+Testes e comandos executados.
+
+## Pendências
+Limitações ou integrações ainda não disponíveis.
+
+Quando não houver pendências, informar:
+
+Nenhuma pendência conhecida nesta etapa.
+
+---
+
+## Após criar o PR
+
+Mostre ao usuário:
+
+- nome da branch
+- hash do commit
+- título do PR
+- URL do PR
+- testes executados
+- resultado dos testes
+- pendências encontradas
+
+Depois PARE.
+
+NUNCA faça merge automaticamente.
+
+NUNCA execute:
+
+gh pr merge
+
+O usuário fará a revisão e o merge manualmente pelo GitHub.
+
+---
+
+## Comandos destrutivos proibidos sem autorização explícita
+
+Nunca executar sem autorização do usuário:
+
+git reset --hard
+
+git clean -fd
+
+git clean -fdx
+
+git push --force
+
+git push --force-with-lease
+
+git branch -D
+
+git checkout -- .
+
+git restore .
+
+git restore --staged . quando houver risco de perda de trabalho
+
+rm -rf em arquivos relevantes do projeto
+
+---
+
+## MAIN protegida
+
+A branch `main` deve ser tratada como branch protegida.
+
+Não:
+
+- editar diretamente nela;
+- commitar diretamente nela;
+- fazer push diretamente nela;
+- fazer merge automaticamente nela.
+
+O objetivo do Agent termina na criação do Pull Request.

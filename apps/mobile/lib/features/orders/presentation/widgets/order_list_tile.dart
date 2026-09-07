@@ -23,7 +23,7 @@ class OrderListTile extends ConsumerWidget {
     );
     final color = order.isCancelled
         ? AppColors.error
-        : order.isDelivered
+        : order.isCompleted
         ? AppColors.success
         : AppColors.accent;
 
@@ -41,7 +41,7 @@ class OrderListTile extends ConsumerWidget {
                 ),
                 const SizedBox(height: AppSpacing.xxs),
                 Text(
-                  Formatters.dateTime(order.createdAtUtc),
+                  '${order.isPickup ? 'Retirada' : 'Entrega'} · ${Formatters.dateTime(order.createdAtUtc)}',
                   style: AppTypography.caption,
                 ),
                 const SizedBox(height: AppSpacing.xs),
