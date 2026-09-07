@@ -49,6 +49,7 @@ try
         options.AddDocumentTransformer((document, _, _) =>
         {
             document.Components ??= new();
+            document.Components.SecuritySchemes ??= new Dictionary<string, IOpenApiSecurityScheme>();
             document.Components.SecuritySchemes["Bearer"] = new OpenApiSecurityScheme
             {
                 Type = SecuritySchemeType.Http,
@@ -200,7 +201,13 @@ try
 
     if (!isTestingEnvironment)
     {
-        RecurringJob.AddOrUpdate<SubscriptionGracePeriodJob>(
+        // `services.AddHangfire(...)` (DI-based registration) never sets the legacy static
+        // `JobStorage.Current` singleton, so the static `RecurringJob.AddOrUpdate` API throws
+        // "Current JobStorage instance has not been initialized" — resolve `IRecurringJobManager`
+        // from DI instead, per Hangfire's own recommendation.
+        using var recurringJobScope = app.Services.CreateScope();
+        var recurringJobManager = recurringJobScope.ServiceProvider.GetRequiredService<IRecurringJobManager>();
+        recurringJobManager.AddOrUpdate<SubscriptionGracePeriodJob>(
             "subscription-grace-period",
             job => job.RunAsync(CancellationToken.None),
             Cron.Daily(hour: 3), // 03:00 UTC — off-peak for the América/São Paulo audience.

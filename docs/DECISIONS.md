@@ -234,3 +234,89 @@ Controlado por `Database:AutoMigrate` (default `true`). Simplicidade para o
 estágio atual do projeto (implantação controlada, sem múltiplas réplicas
 concorrentes rodando migração ao mesmo tempo). Pode ser desligado via
 configuração quando o pipeline de CI/CD assumir a aplicação de migrations.
+
+## 16 — Docker validado pela primeira vez (2026-09-07): 4 bugs reais encontrados e corrigidos
+
+O WSL2/Docker Desktop deste ambiente, que estava quebrado desde o build
+original (ver seção "Blocker" no histórico de progresso), foi corrigido pelo
+usuário. Esta foi a **primeira execução real** de `docker compose up` contra
+um Postgres de verdade — o Dockerfile e o `docker-compose.yml` existiam
+desde o passo 21 mas nunca haviam sido testados. A validação encontrou 4
+bugs reais (nenhum workaround, todos corrigidos na causa raiz):
+
+1. **`.dockerignore` inexistente (causa raiz do `NETSDK1064`).** O
+   `.gitignore` ignora `bin/`/`obj/` para o Git, mas isso é irrelevante para
+   o contexto de build do Docker — sem um `.dockerignore`, `bin/`/`obj/` de
+   todos os projetos (gerados por builds locais no Windows) eram enviados
+   no contexto e `COPY src/ src/` (linha 12 do Dockerfile) os sobrescrevia
+   por cima do `obj/` recém-gerado pelo `dotnet restore` do container.
+   O `obj/project.assets.json` do host grava `packageFolders` como um
+   caminho absoluto do Windows (`C:\Users\<user>\.nuget\packages\`) —
+   inexistente no container Linux — então `dotnet publish --no-restore`
+   falhava com "Package X, version Y was not found" para o primeiro pacote
+   que tentasse resolver (`Microsoft.AspNetCore.OpenApi 10.0.11` no caso
+   relatado; a versão em si existe no NuGet.org e restaura normalmente).
+   Corrigido com um `.dockerignore` na raiz do repo (mesmo diretório do
+   `context: .` do `docker-compose.yml`) excluindo `**/bin/`, `**/obj/`,
+   `.git/`, `.env`, etc.
+2. **`Scalar.AspNetCore` fixado em `2.9.4`, versão que nunca existiu no
+   NuGet** (a série pula de `2.9.0` para `2.10.0` diretamente — confirmado
+   via `api.nuget.org/v3-flatcontainer/scalar.aspnetcore/index.json`). Isso
+   gerava o aviso `NU1603` ("... was not found; 2.10.0 was resolved
+   instead") em todo restore, tornando o build não-reprodutível. Fixado
+   para `2.10.0` (a versão que o NuGet já vinha resolvendo de fato).
+3. **`RecurringJob.AddOrUpdate` (API estática do Hangfire) quebrava o
+   startup fora do ambiente de teste** com
+   `JobStorage instance has not been initialized`. Causa: este projeto usa
+   `services.AddHangfire(...)` (registro via DI), que **não** define o
+   singleton estático legado `JobStorage.Current` — só a API baseada em DI
+   (`IRecurringJobManager`) funciona nesse modelo. Como os testes de
+   integração rodam com `isTestingEnvironment = true` (que pula esse bloco
+   inteiro), esse bug nunca tinha sido exercitado. Corrigido resolvendo
+   `IRecurringJobManager` via `app.Services.CreateScope()` em vez da
+   chamada estática — comportamento idêntico, só a forma de obter a
+   instância muda.
+4. **Usuário não-root sem permissão de escrita em `/app`.** O Dockerfile
+   trocava para `USER appuser` *antes* do `COPY --from=build /app .` — o
+   `WORKDIR /app` já havia criado o diretório como `root` antes do
+   `useradd`, então os arquivos publicados ficavam acessíveis para leitura
+   mas `Directory.CreateDirectory(uploadsRoot)` (`Program.cs`, upload local
+   de arquivos) falhava com `UnauthorizedAccessException` ao tentar criar
+   `/app/uploads`. Corrigido copiando e ajustando a posse
+   (`chown -R appuser:appuser /app`) ainda como `root`, e só então trocando
+   para `USER appuser` — mantém o container rodando como não-root (não é um
+   `USER root` disfarçado), só corrige a ordem das operações.
+
+Bug adicional, fora do Dockerfile mas descoberto no mesmo teste ponta a
+ponta: `GET /openapi/v1.json` retornava 500 (`NullReferenceException`) em
+Development — `Program.cs` fazia `document.Components ??= new()` mas nunca
+inicializava `document.Components.SecuritySchemes` (que também nasce nulo),
+então indexar `["Bearer"]` explodia. O compilador já sinalizava isso com o
+aviso `CS8602`, nunca corrigido. `/scalar/v1` (a página HTML do Scalar)
+retornava 200 mesmo com o JSON quebrado, porque só serve o wrapper estático
+— só falhava ao carregar o spec de fato. Corrigido inicializando o
+dicionário antes de indexá-lo.
+
+Também instalado `libgssapi-krb5-2` na imagem de runtime (`aspnet:10.0`,
+baseada em Debian): sem essa lib, toda tentativa de conexão do Npgsql
+logava `Cannot load library libgssapi_krb5.so.2` durante a negociação
+SASL/GSS. Não travava o app (havia fallback), mas poluía os logs com um
+erro real de uma lib ausente — corrigido na causa, não silenciado.
+
+**Vulnerabilidade conhecida, não corrigida nesta sessão:** `dotnet restore`
+emite `NU1903` para `System.Security.Cryptography.Xml 10.0.0` (múltiplos
+CVEs de alta severidade). É dependência transitiva de
+`PedeLocal.Infrastructure` (via `System.Security.Cryptography.Xml`
+referenciado diretamente — ver `.csproj`). Fora do escopo desta sessão
+(era sobre o build do Docker), mas deve ser investigado antes de produção:
+verificar se há versão corrigida publicada ou se a dependência pode ser
+removida.
+
+Resultado final, tudo executado de verdade (não assumido): `docker compose
+build --no-cache api` limpo, `docker compose up -d` com os dois containers
+estáveis (`postgres` healthy, `api` sem crash-loop), as 3 migrations
+aplicadas contra o Postgres real do container (`InitialCreate`,
+`DeliveryVersionConcurrencyToken`, `AddUserFcmToken` — 32 tabelas
+confirmadas via `\dt`), `/scalar/v1` e `/openapi/v1.json` retornando 200
+com o security scheme `Bearer` presente, `dotnet build` com 0 erros, e
+`dotnet test` com **109/109 testes passando** (93 unit + 16 integration).

@@ -1,0 +1,43 @@
+# .NET build output — must never enter the build context. If these leak in,
+# `COPY src/ src/` in src/PedeLocal.Api/Dockerfile overwrites the container's
+# own `dotnet restore` output with the host's obj/project.assets.json, which
+# hardcodes the host's absolute NuGet packageFolders path (e.g.
+# C:\Users\<user>\.nuget\packages). That path doesn't exist in the Linux
+# build stage, so `dotnet publish --no-restore` fails with NETSDK1064
+# ("package ... was not found") even though restore succeeded moments
+# earlier inside the container.
+**/bin/
+**/obj/
+
+# VCS / IDE / OS
+.git/
+.gitignore
+.vs/
+.idea/
+*.user
+*.suo
+.DS_Store
+Thumbs.db
+
+# Test results / coverage
+**/[Tt]est[Rr]esult*/
+*.trx
+*.coverage
+*.coveragexml
+
+# Publish output
+publish/
+*.pubxml
+
+# Env / secrets — never bake these into an image
+.env
+.env.*
+!.env.example
+
+# Logs
+logs/
+*.log
+
+# Docs / misc not needed for build
+docs/
+*.md
