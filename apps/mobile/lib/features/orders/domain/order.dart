@@ -104,6 +104,32 @@ class Order extends Equatable {
 
   List<String> get lifecycle => isPickup ? pickupLifecycle : deliveryLifecycle;
 
+  Order copyWith({
+    String? status,
+    List<OrderStatusHistoryEntry>? statusHistory,
+  }) {
+    return Order(
+      id: id,
+      customerUserId: customerUserId,
+      establishmentId: establishmentId,
+      cityId: cityId,
+      addressId: addressId,
+      status: status ?? this.status,
+      type: type,
+      paymentMethod: paymentMethod,
+      paymentStatus: paymentStatus,
+      changeForAmount: changeForAmount,
+      subtotal: subtotal,
+      deliveryFee: deliveryFee,
+      total: total,
+      calculatedDistanceKm: calculatedDistanceKm,
+      notes: notes,
+      createdAtUtc: createdAtUtc,
+      items: items,
+      statusHistory: statusHistory ?? this.statusHistory,
+    );
+  }
+
   factory Order.fromJson(Map<String, dynamic> json) {
     return Order(
       id: json['id'] as String,

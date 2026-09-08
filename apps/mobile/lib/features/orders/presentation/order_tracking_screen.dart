@@ -29,6 +29,19 @@ class OrderTrackingScreen extends ConsumerWidget {
     final provider = orderTrackingControllerProvider(orderId);
     final orderAsync = ref.watch(provider);
 
+    ref.listen(provider, (previous, next) {
+      final previousStatus = previous?.value?.status;
+      final nextStatus = next.value?.status;
+      if (previousStatus == null ||
+          nextStatus == null ||
+          previousStatus == nextStatus) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(nextStatus.orderStatusLabel)),
+      );
+    });
+
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(title: const Text('Acompanhar pedido')),

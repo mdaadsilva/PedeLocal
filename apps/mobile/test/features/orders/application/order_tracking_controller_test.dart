@@ -79,8 +79,8 @@ void main() {
     verify(() => ordersRepository.getById('order-1')).called(1);
   });
 
-  test('ao receber OrderStatusChanged deste pedido via SignalR, refaz o GET e '
-      'atualiza a tela sem polling', () async {
+  test('ao receber OrderStatusChanged deste pedido, aplica o status na hora '
+      'e reconcilia via GET sem apagar a UI', () async {
     var callCount = 0;
     when(() => ordersRepository.getById('order-1')).thenAnswer((_) async {
       callCount++;
@@ -88,11 +88,9 @@ void main() {
     });
     final container = buildContainer();
 
-    // Mantém o provider vivo e observa as mudanças de estado.
-    final states = <AsyncValue<Order>>[];
     container.listen(
       orderTrackingControllerProvider('order-1'),
-      (previous, next) => states.add(next),
+      (previous, next) {},
       fireImmediately: true,
     );
     await container.read(orderTrackingControllerProvider('order-1').future);
@@ -100,15 +98,34 @@ void main() {
     eventController.add(
       const OrderStatusChangedEvent(orderId: 'order-1', status: 'Accepted'),
     );
-    // Deixa o listener assíncrono processar o evento e o refresh().
-    await Future<void>.delayed(Duration.zero);
     await Future<void>.delayed(Duration.zero);
 
-    final finalState = container.read(
-      orderTrackingControllerProvider('order-1'),
+    expect(
+      container.read(orderTrackingControllerProvider('order-1')).value?.status,
+      'Accepted',
     );
-    expect(finalState.value?.status, 'Accepted');
+    expect(container.read(orderTrackingControllerProvider('order-1')).isLoading, isFalse);
+
+    await Future<void>.delayed(Duration.zero);
     expect(callCount, 2);
+  });
+
+  test('ignora OrderStatusChanged que regrediria o status', () async {
+    when(() => ordersRepository.getById('order-1'))
+        .thenAnswer((_) async => buildOrder('Delivered'));
+    final container = buildContainer();
+    await container.read(orderTrackingControllerProvider('order-1').future);
+
+    eventController.add(
+      const OrderStatusChangedEvent(orderId: 'order-1', status: 'Preparing'),
+    );
+    await Future<void>.delayed(Duration.zero);
+
+    expect(
+      container.read(orderTrackingControllerProvider('order-1')).value?.status,
+      'Delivered',
+    );
+    verify(() => ordersRepository.getById('order-1')).called(1);
   });
 
   test('ignora eventos OrderStatusChanged de outros pedidos', () async {

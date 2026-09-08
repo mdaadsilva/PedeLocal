@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:pedelocal_mobile/core/network/app_exception.dart';
+import 'package:pedelocal_mobile/core/realtime/delivery_accepted_events.dart';
 import 'package:pedelocal_mobile/core/realtime/delivery_events.dart';
 import 'package:pedelocal_mobile/features/drivers/application/driver_home_controller.dart';
 import 'package:pedelocal_mobile/features/drivers/data/driver_repository.dart';
@@ -57,6 +58,7 @@ void main() {
   }
 
   late StreamController<DeliveryAvailableEvent> deliveryAvailableController;
+  late StreamController<DeliveryAcceptedEvent> deliveryAcceptedController;
 
   ProviderContainer buildContainer() {
     final container = ProviderContainer(
@@ -64,6 +66,9 @@ void main() {
         driverRepositoryProvider.overrideWithValue(driverRepository),
         deliveryAvailableStreamProvider.overrideWith(
           (ref) => deliveryAvailableController.stream,
+        ),
+        deliveryAcceptedStreamProvider.overrideWith(
+          (ref) => deliveryAcceptedController.stream,
         ),
       ],
     );
@@ -75,9 +80,14 @@ void main() {
     driverRepository = MockDriverRepository();
     deliveryAvailableController =
         StreamController<DeliveryAvailableEvent>.broadcast();
+    deliveryAcceptedController =
+        StreamController<DeliveryAcceptedEvent>.broadcast();
   });
 
-  tearDown(() => deliveryAvailableController.close());
+  tearDown(() {
+    deliveryAvailableController.close();
+    deliveryAcceptedController.close();
+  });
 
   test('perfil Available carrega a lista de entregas disponíveis (nunca a entrega atual)', () async {
     when(() => driverRepository.getMyProfile())
@@ -324,6 +334,38 @@ void main() {
         container.read(driverHomeControllerProvider).value!.availableDeliveries,
         hasLength(2),
       );
+    },
+  );
+
+  test(
+    'DeliveryAccepted remove a entrega da lista imediatamente, sem esperar REST',
+    () async {
+      when(() => driverRepository.getMyProfile())
+          .thenAnswer((_) async => buildProfile(status: 'Available'));
+      when(() => driverRepository.getAvailableDeliveries()).thenAnswer(
+        (_) async => [
+          buildDelivery(id: 'delivery-1'),
+          buildDelivery(id: 'delivery-2'),
+        ],
+      );
+      final container = buildContainer();
+      container.listen(driverHomeControllerProvider, (previous, next) {});
+      await container.read(driverHomeControllerProvider.future);
+
+      deliveryAcceptedController.add(
+        const DeliveryAcceptedEvent(deliveryId: 'delivery-1'),
+      );
+      await Future<void>.delayed(Duration.zero);
+
+      expect(
+        container
+            .read(driverHomeControllerProvider)
+            .value!
+            .availableDeliveries
+            .map((delivery) => delivery.id),
+        ['delivery-2'],
+      );
+      verify(() => driverRepository.getAvailableDeliveries()).called(1);
     },
   );
 }

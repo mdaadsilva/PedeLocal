@@ -1,27 +1,27 @@
-/// Nomes de eventos do hub SignalR (`docs/FRONTEND_GUIDE.md#signalr`).
+/// Nomes de eventos do hub SignalR (`docs/REALTIME_EVENTS.md`).
 ///
 /// O servidor decide sozinho em quais grupos a conexão entra a partir do
-/// token — não existe (e não deve ser criado) um método `Subscribe` client
-/// side. Esta classe só centraliza os nomes de evento para
-/// `connection.on(event, handler)`.
+/// token — não existe (e não deve ser criado) um método `Subscribe` no
+/// cliente. Esta classe só centraliza os nomes para `connection.on`.
 abstract class SignalREvents {
   SignalREvents._();
 
-  /// Payload: `{ orderId }`. Recebido por: staff do estabelecimento.
+  /// `{ orderId }` — grupo `establishment:{id}`.
   static const orderCreated = 'OrderCreated';
 
-  /// Payload: `{ orderId, status }`. Recebido por: cliente do pedido + staff.
+  /// `{ orderId, status }` — `customer:{userId}` + `establishment:{id}`.
   static const orderStatusChanged = 'OrderStatusChanged';
 
-  /// Payload: `{ deliveryId }`. Recebido por: entregadores online da cidade.
+  /// `{ deliveryId }` — `city-drivers:{cityId}`.
   static const deliveryAvailable = 'DeliveryAvailable';
 
-  /// Payload: `{ deliveryId, driverId }`. Recebido por: staff do estabelecimento.
+  /// Staff: `{ deliveryId, driverId }`. Demais entregadores da cidade:
+  /// `{ deliveryId }` sem `driverId` (`docs/REALTIME_EVENTS.md`).
   static const deliveryAccepted = 'DeliveryAccepted';
 
-  /// Payload: `{ orderId }`. Recebido por: cliente do pedido + staff.
+  /// `{ orderId }` — `customer:{userId}` + `establishment:{id}`.
   static const deliveryCompleted = 'DeliveryCompleted';
 
-  /// Payload: `{ establishmentId }`. Recebido por: staff do estabelecimento.
+  /// `{ establishmentId }` — `establishment:{id}`.
   static const establishmentSuspended = 'EstablishmentSuspended';
 }

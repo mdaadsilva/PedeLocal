@@ -26,6 +26,17 @@ class HomeDriverScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final homeAsync = ref.watch(driverHomeControllerProvider);
 
+    ref.listen(driverHomeControllerProvider, (previous, next) {
+      final previousCount = previous?.value?.availableDeliveries.length;
+      final nextCount = next.value?.availableDeliveries.length;
+      if (previousCount == null || nextCount == null) return;
+      if (nextCount > previousCount) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Nova entrega disponível')),
+        );
+      }
+    });
+
     return Scaffold(
       appBar: PedeLocalAppBar(
         title: 'PedeLocal Entregador',

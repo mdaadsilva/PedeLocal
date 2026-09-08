@@ -6,6 +6,12 @@ import { orderStatusLabel, paymentLabel } from "@/features/orders/labels";
 import { formatCurrency, formatDateTime, shortId } from "@/lib/formatters";
 import type { Order } from "@/lib/types";
 
+function isFreshPending(order: Order) {
+  if (order.status !== "Pending") return false;
+  const created = new Date(order.createdAtUtc).getTime();
+  return Date.now() - created < 3 * 60 * 1000;
+}
+
 export function OrderTable({ orders }: { orders: Order[] }) {
   return (
     <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white">
@@ -22,11 +28,19 @@ export function OrderTable({ orders }: { orders: Order[] }) {
         </thead>
         <tbody>
           {orders.map((order) => (
-            <tr key={order.id} className="border-t border-slate-100">
+            <tr
+              key={order.id}
+              className={`border-t border-slate-100 ${
+                isFreshPending(order) ? "bg-brand-50/70" : ""
+              }`}
+            >
               <td className="px-4 py-3">
                 <Link className="font-semibold text-brand-700 hover:underline" href={`/pedidos/${order.id}`}>
                   #{shortId(order.id)}
                 </Link>
+                {isFreshPending(order) ? (
+                  <span className="ml-2 text-xs font-semibold text-brand-700">Novo</span>
+                ) : null}
               </td>
               <td className="px-4 py-3 text-slate-600">{formatDateTime(order.createdAtUtc)}</td>
               <td className="px-4 py-3">
