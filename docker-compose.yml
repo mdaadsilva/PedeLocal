@@ -30,6 +30,8 @@ services:
       Jwt__Secret: ${JWT__SECRET:?JWT__SECRET is required}
       Jwt__Issuer: ${JWT__ISSUER:-PedeLocal}
       Jwt__Audience: ${JWT__AUDIENCE:-PedeLocal.Client}
+      Firebase__Enabled: ${FIREBASE__ENABLED:-false}
+      Firebase__CredentialsJson: ${FIREBASE__CREDENTIALSJSON:-}
     ports:
       - "8080:8080"
 

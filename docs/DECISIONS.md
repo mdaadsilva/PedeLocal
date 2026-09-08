@@ -469,3 +469,97 @@ negativo por conexão quebrada).
 
 Resultado: `dotnet build` limpo, `dotnet test` com **142/142 testes
 passando** (118 unit + 24 integration).
+
+## 20 — Push real via Firebase Admin SDK: multi-device, sempre com fallback no-op
+
+Implementado o transporte de push de verdade (Firebase Cloud Messaging) por
+trás de `IPushSender`, substituindo o `NoOpPushSender` único que existia
+desde a decisão #01xx anterior. Ver `docs/PUSH_NOTIFICATIONS.md` para a
+referência completa.
+
+**Modelo de dados: `device_tokens` substitui `users.FcmToken`.** O campo
+único antigo não suportava múltiplos dispositivos por usuário (pedido
+explícito desta etapa). Nova entidade `DeviceToken` (`UserId`, `Token`
+único, `Platform`, `IsActive`, `CreatedAtUtc`/`UpdatedAtUtc` via
+`BaseEntity`) — o token em si é a chave natural: registrar um token já
+existente **reatribui** a linha ao usuário atual em vez de duplicar (tokens
+FCM são únicos por instalação, não por conta — um aparelho
+compartilhado/resetado passando de usuário é o caso legítimo). Migration
+`AddDeviceTokensRemoveUserFcmToken` faz `INSERT ... SELECT` de qualquer
+`FcmToken` pré-existente para `device_tokens` (Platform `Unknown`) antes de
+derrubar a coluna — nenhum dado é descartado silenciosamente, mesmo não
+havendo, na prática, nenhum token real registrado ainda (nenhum cliente
+chamava o endpoint antigo). Validado de ponta a ponta contra o Postgres
+real do `docker compose` deste ambiente (schema conferido via `\d`, não só
+assumido).
+
+**Endpoints: `PUT`/`DELETE /api/me/device-tokens` substituem `PUT
+/api/me/fcm-token`.** Nada no mobile/web chamava o endpoint antigo ainda
+(verificado por grep antes de remover), então a troca não quebra nenhum
+cliente existente. Um único `PUT` idempotente cobre tanto "registrar" quanto
+"atualizar" pedidos pela spec desta etapa — o mesmo padrão já usado por
+`PUT /api/me/profile`; um endpoint "atualizar" separado não teria semântica
+própria (rotação de token É só registrar o novo). `DELETE` aceita corpo
+JSON (em vez de um `{token}` na rota) porque o token é uma string opaca
+longa — colocar isso na URL é desnecessariamente frágil.
+
+**`INotificationService.NotifyAsync`: `dataJson: string?` virou `data:
+IDictionary<string,string>?`.** Antes, nenhum call site populava esse
+parâmetro; agora todo call site passa `{ orderId/deliveryId, eventType }` —
+exatamente o payload pedido nesta etapa, nunca dado pessoal de terceiros
+(em especial, o payload de `DeliveryAvailable` para entregadores não
+vinculados carrega só `deliveryId`, nunca nome/endereço/telefone do
+cliente). O dicionário é serializado uma única vez e reaproveitado como
+`Notification.DataJson` (histórico) e `Message.Data` (payload FCM real) —
+uma função, dois destinos.
+
+**Resiliência estendida para múltiplos devices.** `AppNotificationService`
+sempre persiste a linha em `notifications` antes de tentar qualquer push, e
+o envio é por device: uma falha em um token nunca impede o envio aos
+demais tokens do mesmo usuário nem propaga para quem disparou a
+notificação (`OrderService`/`DeliveryService` continuam sem saber nada
+sobre Firebase). Distinção nova: `InvalidPushTokenException` (token
+permanentemente inválido segundo o FCM — `Unregistered`/`InvalidArgument`)
+desativa só aquele token (`IsActive=false`); qualquer outra exceção
+(rede/quota/outage) é só logada, o token permanece ativo para a próxima
+tentativa. Corrigido de passagem: `NoOpPushSender` antes logava o token
+completo em `LogInformation` — nunca deveria (requisito desta etapa,
+"tokens não aparecem em logs"); agora loga só o comprimento.
+
+**`Firebase:Enabled` como opt-in explícito, com fallback automático em
+qualquer falha de credencial.** Mesmo com `Firebase:Enabled=true`, se
+`GoogleCredential` não conseguir carregar (JSON inválido, arquivo ausente,
+`GOOGLE_APPLICATION_CREDENTIALS` não configurado), a aplicação cai para
+`NoOpPushSender` e loga o erro — nunca falha o startup por causa de push
+mal configurado. Nenhuma credencial em `appsettings*.json`; só
+`Firebase:CredentialsJson`/`Firebase:CredentialsPath` (env var/secret
+montado) ou Application Default Credentials do Google.
+
+**Duas APIs obsoletas usadas deliberadamente, não substituídas:**
+`Message.Token` (SDK sugere `Fid`, mas isso é um identificador
+completamente diferente — Firebase Installation ID, não token de
+registro FCM; não há substituto direto para o que este endpoint faz) e
+`GoogleCredential.FromJson`/`FromFile` (SDK sugere `CredentialFactory`, uma
+proteção contra aceitar credencial de origem *externa não confiável* — não
+é o nosso caso, `CredentialsJson`/`CredentialsPath` são config de operador,
+nunca input de usuário final). Ambas com `#pragma warning disable CS0618`
+pontual e comentário explicando o motivo, mesmo padrão de transparência já
+usado para o NU1903 não corrigido (decisão #18).
+
+**Testes**: sem chamar Firebase real em nenhum teste (nenhum ambiente de
+teste seta `Firebase:Enabled=true`, então `NoOpPushSender` é sempre o que
+roda). `FirebaseFcmPushSender` em si não tem teste unitário direto — é
+deliberadamente fino (só traduz chamada → `Message` FCM e mapeia
+`MessagingErrorCode` → `InvalidPushTokenException`), e os tipos do SDK
+(`FirebaseMessagingException`, `FirebaseMessaging`) não são construíveis em
+teste sem uma biblioteca de mock (que este repositório não usa). Toda a
+lógica de negócio ao redor dele — fan-out multi-device, isolamento por
+usuário, desativação de token inválido, resiliência a falha — está coberta
+por unit tests com um `FakePushSender` de teste. Cobertura nova: unit
+(`DeviceTokenServiceTests`, `AppNotificationServiceTests` reescrito) e
+integração (`DeviceTokenTests` — registro sob o próprio JWT, idempotência,
+401 sem autenticação, DELETE nunca remove token de outro usuário).
+
+Resultado: `dotnet build` limpo, `dotnet test` com **159/159 testes
+passando** (129 unit + 30 integration). Migration aplicada e conferida
+contra Postgres real (`docker compose`), não só InMemory.

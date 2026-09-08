@@ -64,6 +64,7 @@ public interface IAppDbContext
     DbSet<EstablishmentPayment> EstablishmentPayments { get; }
 
     DbSet<Notification> Notifications { get; }
+    DbSet<DeviceToken> DeviceTokens { get; }
 
     DbSet<EstablishmentFeature> EstablishmentFeatures { get; }
 

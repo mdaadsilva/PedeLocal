@@ -101,7 +101,7 @@ public class OrderService(
         await db.SaveChangesAsync(ct);
         await realtime.OrderCreatedAsync(quote.Establishment.Id, order.Id, ct);
         await NotifyEstablishmentStaffAsync(quote.Establishment.Id, NotificationEventType.OrderCreated,
-            "Novo pedido!", "Um novo pedido foi recebido.", ct);
+            "Novo pedido!", "Um novo pedido foi recebido.", order.Id, ct);
         return await GetForCustomerAsync(order.Id, ct);
     }
 
@@ -243,7 +243,8 @@ public class OrderService(
         await DeductStockAsync(order, ct);
         await TransitionAsync(order, OrderStatus.Accepted, ct);
         await notificationService.NotifyAsync(order.CustomerUserId, NotificationEventType.OrderAccepted,
-            "Pedido aceito!", "O estabelecimento aceitou seu pedido e vai começar a preparar.", ct: ct);
+            "Pedido aceito!", "O estabelecimento aceitou seu pedido e vai começar a preparar.",
+            EventData(order.Id, NotificationEventType.OrderAccepted), ct);
         return ToResponse(order);
     }
 
@@ -263,7 +264,8 @@ public class OrderService(
 
         await TransitionAsync(order, OrderStatus.Preparing, ct);
         await notificationService.NotifyAsync(order.CustomerUserId, NotificationEventType.OrderPreparing,
-            "Pedido em preparo!", "O estabelecimento começou a preparar seu pedido.", ct: ct);
+            "Pedido em preparo!", "O estabelecimento começou a preparar seu pedido.",
+            EventData(order.Id, NotificationEventType.OrderPreparing), ct);
         return ToResponse(order);
     }
 
@@ -287,7 +289,8 @@ public class OrderService(
             // The customer collects in person; the merchant closes the loop via CompletePickupAsync.
             await TransitionAsync(order, OrderStatus.Ready, ct);
             await notificationService.NotifyAsync(order.CustomerUserId, NotificationEventType.OrderReady,
-                "Pedido pronto!", "Seu pedido está pronto para retirada no estabelecimento.", ct: ct);
+                "Pedido pronto!", "Seu pedido está pronto para retirada no estabelecimento.",
+                EventData(order.Id, NotificationEventType.OrderReady), ct);
             return ToResponse(order);
         }
 
@@ -328,11 +331,12 @@ public class OrderService(
 
         await realtime.OrderStatusChangedAsync(order.CustomerUserId, order.EstablishmentId, order.Id, order.Status.ToString(), ct);
         await notificationService.NotifyAsync(order.CustomerUserId, NotificationEventType.OrderReady,
-            "Pedido pronto!", "Seu pedido está pronto e logo sairá para entrega.", ct: ct);
+            "Pedido pronto!", "Seu pedido está pronto e logo sairá para entrega.",
+            EventData(order.Id, NotificationEventType.OrderReady), ct);
         if (newDelivery is not null)
         {
             await realtime.DeliveryAvailableAsync(order.CityId, newDelivery.Id, ct);
-            await NotifyEligibleDriversAsync(order.CityId, ct);
+            await NotifyEligibleDriversAsync(order.CityId, newDelivery.Id, ct);
         }
 
         return ToResponse(order);
@@ -362,7 +366,8 @@ public class OrderService(
         await TransitionAsync(order, OrderStatus.PickupCompleted, ct);
 
         await notificationService.NotifyAsync(order.CustomerUserId, NotificationEventType.OrderDelivered,
-            "Pedido retirado!", "Seu pedido foi retirado com sucesso. Bom apetite!", ct: ct);
+            "Pedido retirado!", "Seu pedido foi retirado com sucesso. Bom apetite!",
+            EventData(order.Id, NotificationEventType.OrderDelivered), ct);
         return ToResponse(order);
     }
 
@@ -413,7 +418,8 @@ public class OrderService(
         await db.SaveChangesAsync(ct);
         await realtime.OrderStatusChangedAsync(order.CustomerUserId, order.EstablishmentId, order.Id, order.Status.ToString(), ct);
         await notificationService.NotifyAsync(order.CustomerUserId, NotificationEventType.OrderCancelled,
-            "Pedido cancelado", "Seu pedido foi cancelado pelo estabelecimento.", ct: ct);
+            "Pedido cancelado", "Seu pedido foi cancelado pelo estabelecimento.",
+            EventData(order.Id, NotificationEventType.OrderCancelled), ct);
         return ToResponse(order);
     }
 
@@ -669,7 +675,7 @@ public class OrderService(
 
     /// <summary>Fans out a notification to every staff user linked to the establishment
     /// (establishment_users — any StaffRole), regardless of how many people work there.</summary>
-    private async Task NotifyEstablishmentStaffAsync(Guid establishmentId, NotificationEventType type, string title, string body, CancellationToken ct)
+    private async Task NotifyEstablishmentStaffAsync(Guid establishmentId, NotificationEventType type, string title, string body, Guid orderId, CancellationToken ct)
     {
         var staffUserIds = await db.EstablishmentUsers
             .Where(eu => eu.EstablishmentId == establishmentId)
@@ -678,15 +684,16 @@ public class OrderService(
 
         foreach (var staffUserId in staffUserIds)
         {
-            await notificationService.NotifyAsync(staffUserId, type, title, body, ct: ct);
+            await notificationService.NotifyAsync(staffUserId, type, title, body, EventData(orderId, type), ct);
         }
     }
 
     /// <summary>Fans out a "new delivery available" notification to every approved, currently
     /// available driver in the city — the same audience as the DeliveryAvailable realtime group
     /// (city-drivers:{cityId}), but as a persisted/push notification for drivers who aren't
-    /// actively connected to the hub right now.</summary>
-    private async Task NotifyEligibleDriversAsync(Guid cityId, CancellationToken ct)
+    /// actively connected to the hub right now. Payload is deliberately just the delivery id — no
+    /// customer name/address/phone goes to a driver who hasn't accepted it yet.</summary>
+    private async Task NotifyEligibleDriversAsync(Guid cityId, Guid deliveryId, CancellationToken ct)
     {
         var driverUserIds = await db.Drivers
             .Where(d => d.CityId == cityId
@@ -695,12 +702,27 @@ public class OrderService(
             .Select(d => d.UserId)
             .ToListAsync(ct);
 
+        var data = new Dictionary<string, string>
+        {
+            ["deliveryId"] = deliveryId.ToString(),
+            ["eventType"] = nameof(NotificationEventType.DeliveryAvailable)
+        };
+
         foreach (var driverUserId in driverUserIds)
         {
             await notificationService.NotifyAsync(driverUserId, NotificationEventType.DeliveryAvailable,
-                "Nova entrega disponível!", "Há uma nova entrega disponível na sua cidade.", ct: ct);
+                "Nova entrega disponível!", "Há uma nova entrega disponível na sua cidade.", data, ct);
         }
     }
+
+    /// <summary>Minimal push/notification data payload: just the order id and the event type name —
+    /// never anything a customer/staff member wouldn't already see by opening the app
+    /// (docs/PUSH_NOTIFICATIONS.md).</summary>
+    private static Dictionary<string, string> EventData(Guid orderId, NotificationEventType type) => new()
+    {
+        ["orderId"] = orderId.ToString(),
+        ["eventType"] = type.ToString()
+    };
 
     private async Task<Order> LoadOwnedMerchantOrderAsync(Guid establishmentId, Guid orderId, CancellationToken ct) =>
         await LoadFullOrderQuery().SingleOrDefaultAsync(o => o.Id == orderId && o.EstablishmentId == establishmentId, ct)

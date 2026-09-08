@@ -11,9 +11,6 @@ public class User : BaseEntity
     public bool IsActive { get; set; } = true;
     public DateTime? DeletedAtUtc { get; set; }
 
-    /// <summary>Firebase Cloud Messaging device token for push notifications (docs section 57).</summary>
-    public string? FcmToken { get; set; }
-
     public ICollection<UserRole> UserRoles { get; set; } = new List<UserRole>();
     public ICollection<RefreshToken> RefreshTokens { get; set; } = new List<RefreshToken>();
 }

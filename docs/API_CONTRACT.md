@@ -26,7 +26,7 @@ Convenções gerais, enums e o formato de erro padrão estão em
 | Método | Rota |
 |---|---|
 | GET/PUT | `/profile` |
-| PUT | `/fcm-token` |
+| PUT/DELETE | `/device-tokens` (registrar/remover token de push) |
 | GET | `/notifications` |
 | POST | `/notifications/{id}/read` |
 | GET | `/data` (export LGPD) |
@@ -144,4 +144,6 @@ Convenções gerais, enums e o formato de erro padrão estão em
 |---|---|
 | SignalR (WebSocket) | `/hubs/pedelocal?access_token=<jwt>` |
 
-Ver `docs/REALTIME_EVENTS.md` para grupos, eventos, payloads e notificações.
+Ver `docs/REALTIME_EVENTS.md` para grupos, eventos e payloads do SignalR, e
+`docs/PUSH_NOTIFICATIONS.md` para push (Firebase Cloud Messaging) —
+endpoints de device token, eventos que geram push e configuração.

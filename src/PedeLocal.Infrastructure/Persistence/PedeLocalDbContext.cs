@@ -78,6 +78,7 @@ public class PedeLocalDbContext : DbContext, IAppDbContext
 
     // Notifications
     public DbSet<Notification> Notifications => Set<Notification>();
+    public DbSet<DeviceToken> DeviceTokens => Set<DeviceToken>();
 
     // Features
     public DbSet<EstablishmentFeature> EstablishmentFeatures => Set<EstablishmentFeature>();
