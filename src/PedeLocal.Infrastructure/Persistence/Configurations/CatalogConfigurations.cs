@@ -25,6 +25,7 @@ public class ProductConfiguration : IEntityTypeConfiguration<Product>
         builder.Property(p => p.Price).HasColumnType("numeric(12,2)");
         builder.Property(p => p.PromotionalPrice).HasColumnType("numeric(12,2)");
         builder.Property(p => p.StockMode).HasConversion<string>().HasMaxLength(16);
+        builder.Property(p => p.Version).IsConcurrencyToken();
         builder.HasIndex(p => p.EstablishmentId);
         builder.HasIndex(p => p.MenuCategoryId);
 

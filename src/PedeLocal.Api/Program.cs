@@ -9,6 +9,7 @@ using Microsoft.Extensions.FileProviders;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi;
 using PedeLocal.Api.Errors;
+using PedeLocal.Api.Filters;
 using Scalar.AspNetCore;
 using PedeLocal.Api.Services;
 using PedeLocal.Application;
@@ -43,7 +44,7 @@ try
         .ReadFrom.Services(services)
         .Enrich.FromLogContext());
 
-    builder.Services.AddControllers();
+    builder.Services.AddControllers(options => options.Filters.Add<ValidationActionFilter>());
     builder.Services.AddOpenApi(options =>
     {
         options.AddDocumentTransformer((document, _, _) =>
@@ -218,7 +219,26 @@ try
 
     app.UseSerilogRequestLogging();
 
+    if (!app.Environment.IsDevelopment())
+    {
+        // Not set in Development so local HTTP-over-localhost workflows (dotnet run without a
+        // dev cert, WebApplicationFactory's in-memory TestServer) aren't forced onto HTTPS.
+        app.UseHsts();
+    }
+
     app.UseHttpsRedirection();
+
+    app.Use(async (context, next) =>
+    {
+        // Cheap, unconditional response headers — none of these depend on trusting any
+        // client-supplied header, unlike X-Forwarded-*, which needs a reverse proxy in front of
+        // this app to be configured safely (see docs/SECURITY_AUDIT.md) and is deliberately left
+        // for that deployment's own configuration instead of assumed here.
+        context.Response.Headers["X-Content-Type-Options"] = "nosniff";
+        context.Response.Headers["X-Frame-Options"] = "DENY";
+        context.Response.Headers["Referrer-Policy"] = "no-referrer";
+        await next();
+    });
 
     var uploadsRoot = builder.Configuration["Storage:LocalRootPath"] ?? Path.Combine(AppContext.BaseDirectory, "uploads");
     Directory.CreateDirectory(uploadsRoot);

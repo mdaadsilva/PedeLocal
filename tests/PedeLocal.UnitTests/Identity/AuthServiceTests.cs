@@ -130,4 +130,46 @@ public class AuthServiceTests
 
         await sut.ForgotPasswordAsync(new ForgotPasswordRequest("unknown@example.com"), CancellationToken.None);
     }
+
+    [Fact]
+    public async Task Refresh_ReusedRevokedToken_RevokesLiveDescendantSession_AndAudits()
+    {
+        var sut = CreateSut(out var db);
+        await sut.RegisterCustomerAsync(
+            new RegisterCustomerRequest("Maria Silva", "maria@example.com", "14999990000", "Senha123"),
+            CancellationToken.None);
+        var login = await sut.LoginAsync(
+            new LoginRequest("maria@example.com", "Senha123"), "127.0.0.1", CancellationToken.None);
+
+        // Legitimate rotation — login.RefreshToken is now dead, refreshed.RefreshToken is live.
+        var refreshed = await sut.RefreshAsync(new RefreshRequest(login.RefreshToken), "127.0.0.1", CancellationToken.None);
+
+        // An attacker (or a stale client) replays the ORIGINAL, already-rotated-away token.
+        await Assert.ThrowsAsync<UnauthorizedAppException>(() =>
+            sut.RefreshAsync(new RefreshRequest(login.RefreshToken), "10.0.0.99", CancellationToken.None));
+
+        // The live descendant born from that rotation must be killed too, not just the reused token.
+        await Assert.ThrowsAsync<UnauthorizedAppException>(() =>
+            sut.RefreshAsync(new RefreshRequest(refreshed.RefreshToken), "127.0.0.1", CancellationToken.None));
+
+        Assert.Contains(db.AuditLogs, a => a.Action == Domain.Audit.AuditActions.RefreshTokenReuseDetected);
+    }
+
+    [Fact]
+    public async Task Refresh_DeactivatedUser_Throws()
+    {
+        var sut = CreateSut(out var db);
+        var registered = await sut.RegisterCustomerAsync(
+            new RegisterCustomerRequest("Maria Silva", "maria@example.com", "14999990000", "Senha123"),
+            CancellationToken.None);
+        var login = await sut.LoginAsync(
+            new LoginRequest("maria@example.com", "Senha123"), "127.0.0.1", CancellationToken.None);
+
+        var user = await db.Users.FindAsync(registered.UserId);
+        user!.IsActive = false;
+        await db.SaveChangesAsync();
+
+        await Assert.ThrowsAsync<UnauthorizedAppException>(() =>
+            sut.RefreshAsync(new RefreshRequest(login.RefreshToken), "127.0.0.1", CancellationToken.None));
+    }
 }

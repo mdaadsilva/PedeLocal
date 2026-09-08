@@ -53,6 +53,7 @@ public class InventoryService(IAppDbContext db, ICurrentUserService currentUser,
         }
 
         product.StockQuantity = newQuantity;
+        product.Version++;
 
         var movement = new InventoryMovement
         {
@@ -73,7 +74,17 @@ public class InventoryService(IAppDbContext db, ICurrentUserService currentUser,
             MetadataJson = $"{{\"type\":\"{type}\",\"previousQuantity\":{previousQuantity},\"newQuantity\":{newQuantity}}}"
         });
 
-        await db.SaveChangesAsync(ct);
+        try
+        {
+            await db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            // Same Product.Version optimistic token used by OrderService's stock deduction —
+            // a concurrent adjustment/order-accept touched this product between our read and write.
+            throw new ConflictException("PRODUCT_STOCK_CONFLICT",
+                "O estoque deste produto foi alterado concorrentemente. Tente novamente.");
+        }
         return ToResponse(movement);
     }
 

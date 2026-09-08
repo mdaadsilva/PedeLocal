@@ -415,7 +415,7 @@ public class OrderService(
             EntityType = nameof(Order), EntityId = order.Id, MetadataJson = request.Reason is null ? null : $"{{\"reason\":\"{request.Reason}\"}}"
         });
 
-        await db.SaveChangesAsync(ct);
+        await SaveChangesGuardingStockConcurrencyAsync(ct);
         await realtime.OrderStatusChangedAsync(order.CustomerUserId, order.EstablishmentId, order.Id, order.Status.ToString(), ct);
         await notificationService.NotifyAsync(order.CustomerUserId, NotificationEventType.OrderCancelled,
             "Pedido cancelado", "Seu pedido foi cancelado pelo estabelecimento.",
@@ -621,6 +621,7 @@ public class OrderService(
             var previous = product.StockQuantity ?? 0;
             var updated = previous - item.Quantity;
             product.StockQuantity = updated;
+            product.Version++;
 
             db.InventoryMovements.Add(new InventoryMovement
             {
@@ -648,6 +649,7 @@ public class OrderService(
             var previous = product.StockQuantity ?? 0;
             var updated = previous + item.Quantity;
             product.StockQuantity = updated;
+            product.Version++;
 
             db.InventoryMovements.Add(new InventoryMovement
             {
@@ -668,8 +670,25 @@ public class OrderService(
         db.OrderStatusHistories.Add(new OrderStatusHistory { OrderId = order.Id, Status = newStatus, ChangedByUserId = currentUser.UserId });
         if (save)
         {
-            await db.SaveChangesAsync(ct);
+            await SaveChangesGuardingStockConcurrencyAsync(ct);
             await realtime.OrderStatusChangedAsync(order.CustomerUserId, order.EstablishmentId, order.Id, newStatus.ToString(), ct);
+        }
+    }
+
+    /// <summary>Two orders for the same Controlled-stock product can be accepted/cancelled
+    /// concurrently by different requests — Product.Version (optimistic concurrency token, same
+    /// pattern as Delivery.Version) turns what would otherwise be a silent lost-update (oversold
+    /// stock) into a clean, retryable 409 instead.</summary>
+    private async Task SaveChangesGuardingStockConcurrencyAsync(CancellationToken ct)
+    {
+        try
+        {
+            await db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            throw new ConflictException("PRODUCT_STOCK_CONFLICT",
+                "O estoque de um ou mais produtos foi alterado concorrentemente. Tente novamente.");
         }
     }
 

@@ -1,3 +1,4 @@
+using Microsoft.EntityFrameworkCore;
 using PedeLocal.Application.Common;
 using PedeLocal.Application.Common.Exceptions;
 using PedeLocal.Application.Orders;
@@ -444,5 +445,50 @@ public class OrderServiceTests
         var deliveryNotifications = notifications.Notifications.Where(n => n.Type == NotificationEventType.DeliveryAvailable).ToList();
         var recipient = Assert.Single(deliveryNotifications);
         Assert.Equal(eligibleDriverUserId, recipient.UserId);
+    }
+
+    // ---------------------------------------------------------------
+    // Concurrent stock deduction (docs/SECURITY_AUDIT.md)
+    // ---------------------------------------------------------------
+
+    [Fact]
+    public async Task Accept_TwoOrdersForSameProduct_Concurrently_SecondGetsStockConflict_NeverOversells()
+    {
+        var fx = await OrderTestFixture.CreateAsync(stockQuantity: 10);
+        var customerSut = BuildCustomerSut(fx);
+        var order1 = await customerSut.CreateAsync(BuildCreateRequest(fx, quantity: 3, withOption: false), CancellationToken.None);
+        var order2 = await customerSut.CreateAsync(BuildCreateRequest(fx, quantity: 3, withOption: false, idempotencyKey: "order-2"), CancellationToken.None);
+
+        // Two independent DbContext instances over the SAME store, simulating two concurrent
+        // requests each accepting a DIFFERENT order that both deduct from the same product.
+        var dbA = fx.Db;
+        var dbB = InMemoryDbContextFactory.CreateAdditionalContext(fx.DatabaseName);
+
+        // Both "requests" read the product before either one writes.
+        _ = await dbB.Products.SingleAsync(p => p.Id == fx.Product.Id);
+
+        var userA = new FakeCurrentUserService(fx.StaffUserId);
+        var sutA = new OrderService(dbA, userA, new EstablishmentAccessGuard(dbA, userA), new HaversineDistanceService(),
+            TestTokenService.Create(), TestDeliveryCodeCipher.Create(), new NoOpRealtimeNotifier(), new NoOpNotificationService());
+        var userB = new FakeCurrentUserService(fx.StaffUserId);
+        var sutB = new OrderService(dbB, userB, new EstablishmentAccessGuard(dbB, userB), new HaversineDistanceService(),
+            TestTokenService.Create(), TestDeliveryCodeCipher.Create(), new NoOpRealtimeNotifier(), new NoOpNotificationService());
+
+        var acceptedA = await sutA.AcceptAsync(fx.Establishment.Id, order1.Id, CancellationToken.None);
+        Assert.Equal("Accepted", acceptedA.Status);
+
+        // B's context still holds the stale (pre-A) tracked product — its SaveChanges must fail
+        // cleanly (409-mapped ConflictException), never silently overwrite A's deduction with a
+        // lost-update. (Whether EF's InMemory test double rolls back the *rest* of B's unrelated
+        // changes atomically on that failure isn't something InMemory reliably emulates — real
+        // Postgres transactions do; this test's contract is specifically that the conflict is
+        // detected and surfaced, not silently lost.)
+        await Assert.ThrowsAsync<ConflictException>(() => sutB.AcceptAsync(fx.Establishment.Id, order2.Id, CancellationToken.None));
+
+        // A's own deduction — independent of B's conflict/rollback — must still be intact.
+        var verifyDb = InMemoryDbContextFactory.CreateAdditionalContext(fx.DatabaseName);
+        var finalProduct = await verifyDb.Products.SingleAsync(p => p.Id == fx.Product.Id);
+        Assert.True(finalProduct.StockQuantity is >= 0 and <= 7); // never oversold below zero, and A's -3 always applied.
+        Assert.Contains(verifyDb.InventoryMovements, m => m.Type == InventoryMovementType.Sale && m.OrderId == order1.Id);
     }
 }
