@@ -13,6 +13,7 @@ import { listAdminOrders } from "@/features/orders/api";
 import { OrderTable } from "@/features/orders/order-table";
 import { getSubscriptionOrNull } from "@/features/subscriptions/api";
 import { formatCurrency, formatDateTime } from "@/lib/formatters";
+import { mapPool } from "@/lib/pool";
 
 export default function DashboardPage() {
   const query = useQuery({
@@ -25,8 +26,8 @@ export default function DashboardPage() {
         listCustomers({ page: 1, pageSize: 1 }),
         listAdminOrders({ page: 1, pageSize: 100 }),
       ]);
-      const subscriptions = await Promise.all(
-        establishments.map((item) => getSubscriptionOrNull(item.id)),
+      const subscriptions = await mapPool(establishments, 4, (item) =>
+        getSubscriptionOrNull(item.id),
       );
       return { cities, establishments, drivers, customers, orders, subscriptions };
     },

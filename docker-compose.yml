@@ -34,6 +34,8 @@ services:
       Firebase__CredentialsJson: ${FIREBASE__CREDENTIALSJSON:-}
       Cors__AllowedOrigins__0: ${CORS__ALLOWEDORIGINS__0:-}
       Cors__AllowedOrigins__1: ${CORS__ALLOWEDORIGINS__1:-}
+      RateLimiting__AuthPermitLimit: ${RATELIMITING__AUTHPERMITLIMIT:-5}
+      RateLimiting__GlobalPermitLimit: ${RATELIMITING__GLOBALPERMITLIMIT:-100}
     ports:
       - "8080:8080"
 
