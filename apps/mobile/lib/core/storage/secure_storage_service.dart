@@ -17,6 +17,7 @@ class SecureStorageService {
   static const _accessTokenKey = 'pedelocal.access_token';
   static const _refreshTokenKey = 'pedelocal.refresh_token';
   static const _accessTokenExpiresAtKey = 'pedelocal.access_token_expires_at';
+  static const _fcmTokenKey = 'pedelocal.fcm_device_token';
 
   Future<void> saveTokens({
     required String accessToken,
@@ -50,6 +51,15 @@ class SecureStorageService {
       _storage.delete(key: _accessTokenExpiresAtKey),
     ]);
   }
+
+  /// Token FCM deste aparelho — usado só para `DELETE /api/me/device-tokens`
+  /// no logout. Nunca logar o valor.
+  Future<void> saveFcmToken(String token) =>
+      _storage.write(key: _fcmTokenKey, value: token);
+
+  Future<String?> readFcmToken() => _storage.read(key: _fcmTokenKey);
+
+  Future<void> clearFcmToken() => _storage.delete(key: _fcmTokenKey);
 }
 
 final secureStorageServiceProvider = Provider<SecureStorageService>((ref) {

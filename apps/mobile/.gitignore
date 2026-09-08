@@ -44,5 +44,11 @@ app.*.map.json
 /android/app/profile
 /android/app/release
 
+# Firebase client configs — generate in the Firebase Console, never commit.
+**/google-services.json
+**/GoogleService-Info.plist
+**/GoogleService-Info.plist.debug
+**/firebase_app_id_file.json
+
 # Widget Preview related
 .widget_preview/

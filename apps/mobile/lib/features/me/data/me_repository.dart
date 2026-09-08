@@ -5,9 +5,7 @@ import '../../../core/network/api_client.dart';
 import '../../../core/network/app_exception.dart';
 import '../domain/my_profile.dart';
 
-/// Chamadas de `/api/me/*` relevantes para esta etapa (perfil — usado pela
-/// resolução de sessão/role). Endpoints de notificações, export LGPD e
-/// exclusão de conta existem no contrato mas pertencem a telas futuras.
+/// Chamadas de `/api/me/*` (perfil, device tokens de push, exclusão).
 class MeRepository {
   MeRepository(this._dio);
 
@@ -17,6 +15,36 @@ class MeRepository {
     try {
       final response = await _dio.get<Map<String, dynamic>>('/api/me/profile');
       return MyProfile.fromJson(response.data!);
+    } on DioException catch (e) {
+      throw AppException.fromDioException(e);
+    }
+  }
+
+  /// `PUT /api/me/device-tokens` — registra/atualiza o token FCM do
+  /// dispositivo autenticado. Idempotente. O `userId` vem do JWT — nunca
+  /// enviado no corpo (`docs/PUSH_NOTIFICATIONS.md`).
+  Future<void> registerDeviceToken({
+    required String token,
+    required String platform,
+  }) async {
+    try {
+      await _dio.put<void>(
+        '/api/me/device-tokens',
+        data: {'token': token, 'platform': platform},
+      );
+    } on DioException catch (e) {
+      throw AppException.fromDioException(e);
+    }
+  }
+
+  /// `DELETE /api/me/device-tokens` — remove o token deste aparelho
+  /// (logout). Idempotente se o token não existir para o usuário.
+  Future<void> removeDeviceToken(String token) async {
+    try {
+      await _dio.delete<void>(
+        '/api/me/device-tokens',
+        data: {'token': token},
+      );
     } on DioException catch (e) {
       throw AppException.fromDioException(e);
     }

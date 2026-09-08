@@ -237,9 +237,11 @@ Passos necessários, fora deste repositório, para obter uma credencial real:
    ou montar o arquivo e apontar `Firebase__CredentialsPath` para ele.
 5. Definir `Firebase__Enabled=true` nesse ambiente.
 
-Nenhum passo adicional do lado do Flutter é necessário neste repositório —
-ver "Integração esperada no Flutter" abaixo para o que o app **vai**
-precisar fazer (fora desta etapa, que é só backend).
+A integração Flutter (CUSTOMER/DRIVER) está em `apps/mobile` — ver
+`apps/mobile/README.md` para arquivos do Console, package/bundle id e
+comportamento foreground/background. Sem `google-services.json` /
+`GoogleService-Info.plist` o app mobile continua compilável; só o push
+no aparelho fica inativo.
 
 ## Comportamento quando o Firebase não está configurado
 
@@ -256,24 +258,19 @@ outra parte do sistema muda de comportamento:
 - Nenhuma exceção, nenhum efeito colateral, nenhuma degradação de qualquer
   outro endpoint.
 
-## Integração esperada no Flutter
+## Integração Flutter (apps/mobile)
 
-Fora do escopo desta etapa (backend apenas — mobile não foi alterado
-nesta sessão), mas para referência futura, o app deve:
+Implementado para CUSTOMER e DRIVER. Detalhes operacionais (Console,
+onde colocar os arquivos, teste) em `apps/mobile/README.md`.
 
-1. Pedir permissão de notificação (`firebase_messaging`'s
-   `requestPermission`) e obter o token (`getToken()`).
-2. Chamar `PUT /api/me/device-tokens` com esse token a cada start do app
-   autenticado, e sempre que `onTokenRefresh` disparar.
-3. Chamar `DELETE /api/me/device-tokens` com o token atual no logout.
-4. Tratar o `data` payload da notificação recebida (`orderId`/`deliveryId`/
-   `eventType`) para navegar direto à tela relevante — nunca confiar no
-   payload como fonte de verdade para os dados exibidos, sempre buscar via
-   REST antes de renderizar (mesma regra do SignalR,
-   `docs/REALTIME_EVENTS.md#reconexão-esperada-no-cliente`).
-5. Tratar notificação em foreground/background/terminated conforme os
-   três modos padrão do `firebase_messaging` — nenhum desses modos precisa
-   de endpoint adicional além dos dois acima.
+1. Permissão via `requestPermission` (uma vez) e token via `getToken()`.
+2. `PUT /api/me/device-tokens` após autenticação e em `onTokenRefresh`.
+3. `DELETE /api/me/device-tokens` no logout, **antes** de limpar a sessão.
+4. Payload `data` (`orderId`/`deliveryId`/`eventType`/`batchId`) só para
+   navegar; os dados da tela vêm da REST autorizada.
+5. Foreground: snackbar discreto, sem duplicar SignalR. Background/
+   terminated: handler oficial do Firebase + `onMessageOpenedApp` /
+   `getInitialMessage()`.
 
 ## Migration
 

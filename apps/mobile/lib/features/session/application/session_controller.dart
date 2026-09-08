@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/network/app_exception.dart';
 import '../../../core/network/session_expired_notifier.dart';
+import '../../../core/notifications/push_notification_service.dart';
 import '../../../core/storage/secure_storage_service.dart';
 import '../../auth/data/auth_repository.dart';
 import '../../me/data/me_repository.dart';
@@ -55,8 +56,14 @@ class SessionController extends AsyncNotifier<SessionState> {
     state = await AsyncValue.guard(_resolveSession);
   }
 
-  /// Logout explícito (ação do usuário).
+  /// Logout explícito (ação do usuário). Remove o device token no backend
+  /// **antes** de revogar a sessão local, enquanto o JWT ainda vale.
   Future<void> logout() async {
+    try {
+      await ref.read(pushTokenLifecycleProvider).unregisterCurrentToken();
+    } catch (_) {
+      // Falha de push não pode impedir o logout local + SignalR.
+    }
     await ref.read(authRepositoryProvider).logout();
     state = const AsyncValue.data(SessionState.unauthenticated());
   }

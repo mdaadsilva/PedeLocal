@@ -2,6 +2,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:pedelocal_mobile/app.dart';
+import 'package:pedelocal_mobile/core/notifications/push_messaging_gateway.dart';
+import 'package:pedelocal_mobile/core/notifications/push_notification_service.dart';
 import 'package:pedelocal_mobile/core/storage/preferences_service.dart';
 import 'package:pedelocal_mobile/core/storage/secure_storage_service.dart';
 import 'package:pedelocal_mobile/core/widgets/brand_wordmark.dart';
@@ -24,6 +26,9 @@ void main() {
           overrides: [
             sharedPreferencesProvider.overrideWithValue(prefs),
             secureStorageServiceProvider.overrideWithValue(secureStorage),
+            pushMessagingGatewayProvider.overrideWithValue(
+              const UnavailablePushMessagingGateway(),
+            ),
           ],
           child: const PedeLocalApp(),
         ),

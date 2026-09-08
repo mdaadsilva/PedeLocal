@@ -132,11 +132,10 @@ Cada evento que gera push também vira uma notificação em
 `GET /api/me/notifications`, mesmo sem nenhum token registrado ou com o
 provedor fora do ar — o histórico nunca depende do push ter funcionado.
 
-**Estado atual**: o backend já integra o Firebase Admin SDK de verdade —
-`IPushSender` só cai de volta para o modo no-op (loga, não envia) quando
-`Firebase:Enabled` não está configurado (o padrão, até um projeto Firebase
-real existir). Ver `docs/PUSH_NOTIFICATIONS.md` para variáveis de ambiente
-e passos no Firebase Console.
+O app Flutter (`apps/mobile`) registra/remove o device token nesses
+endpoints após login e no logout. Setup do projeto Firebase no aparelho:
+`apps/mobile/README.md`. O backend só envia push de verdade com
+`Firebase:Enabled=true` e service account — `docs/PUSH_NOTIFICATIONS.md`.
 
 ## Enums de status (nomes exatos usados na API — sempre em `PascalCase`)
 

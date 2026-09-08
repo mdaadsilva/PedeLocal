@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/network/app_exception.dart';
+import '../../../core/notifications/recent_notification_feedback.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/theme/app_typography.dart';
 import '../../../core/widgets/empty_state_view.dart';
@@ -31,6 +32,10 @@ class HomeDriverScreen extends ConsumerWidget {
       final nextCount = next.value?.availableDeliveries.length;
       if (previousCount == null || nextCount == null) return;
       if (nextCount > previousCount) {
+        final feedback = ref.read(recentNotificationFeedbackProvider);
+        if (!feedback.claim('delivery-available')) {
+          return;
+        }
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Nova entrega disponível')),
         );

@@ -4,6 +4,12 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+// Sem o arquivo real do Firebase Console o plugin falha o build.
+// O app permanece compilável até o arquivo ser colocado em android/app/.
+if (file("google-services.json").exists()) {
+    apply(plugin = "com.google.gms.google-services")
+}
+
 android {
     namespace = "com.pedelocal.pedelocal_mobile"
     compileSdk = 37

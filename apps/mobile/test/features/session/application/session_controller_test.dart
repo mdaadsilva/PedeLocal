@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:pedelocal_mobile/core/network/app_exception.dart';
+import 'package:pedelocal_mobile/core/notifications/push_notification_service.dart';
 import 'package:pedelocal_mobile/core/storage/secure_storage_service.dart';
 import 'package:pedelocal_mobile/features/auth/data/auth_repository.dart';
 import 'package:pedelocal_mobile/features/me/data/me_repository.dart';
@@ -9,6 +10,8 @@ import 'package:pedelocal_mobile/features/me/domain/my_profile.dart';
 import 'package:pedelocal_mobile/features/session/application/session_controller.dart';
 import 'package:pedelocal_mobile/features/session/domain/session_state.dart';
 import 'package:pedelocal_mobile/features/session/domain/user_role.dart';
+
+import '../../../core/notifications/fake_push_token_lifecycle.dart';
 
 class MockSecureStorageService extends Mock implements SecureStorageService {}
 
@@ -20,6 +23,7 @@ void main() {
   late MockSecureStorageService secureStorage;
   late MockMeRepository meRepository;
   late MockAuthRepository authRepository;
+  late FakePushTokenLifecycle pushLifecycle;
 
   ProviderContainer buildContainer() {
     final container = ProviderContainer(
@@ -27,6 +31,7 @@ void main() {
         secureStorageServiceProvider.overrideWithValue(secureStorage),
         meRepositoryProvider.overrideWithValue(meRepository),
         authRepositoryProvider.overrideWithValue(authRepository),
+        pushTokenLifecycleProvider.overrideWithValue(pushLifecycle),
       ],
     );
     addTearDown(container.dispose);
@@ -37,6 +42,7 @@ void main() {
     secureStorage = MockSecureStorageService();
     meRepository = MockMeRepository();
     authRepository = MockAuthRepository();
+    pushLifecycle = FakePushTokenLifecycle();
   });
 
   test(
@@ -94,7 +100,7 @@ void main() {
     verify(() => secureStorage.clearTokens()).called(1);
   });
 
-  test('logout chama o AuthRepository e limpa o estado local', () async {
+  test('logout remove o device token e depois limpa a sessão local', () async {
     when(() => secureStorage.hasSession()).thenAnswer((_) async => false);
     when(() => authRepository.logout()).thenAnswer((_) async {});
     final container = buildContainer();
@@ -104,6 +110,7 @@ void main() {
 
     final state = container.read(sessionControllerProvider).value;
     expect(state, const SessionState.unauthenticated());
+    expect(pushLifecycle.unregisterCalls, 1);
     verify(() => authRepository.logout()).called(1);
   });
 }
