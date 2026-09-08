@@ -133,10 +133,17 @@ public class DriverService(IAppDbContext db, ICurrentUserService currentUser)
     private Guid RequireUserId() =>
         currentUser.UserId ?? throw new UnauthorizedAppException("UNAUTHENTICATED", "Usuário não autenticado.");
 
-    private IQueryable<(Domain.Drivers.Driver Driver, string Name)> LoadWithUserAsync() =>
+    private IQueryable<DriverUserRow> LoadWithUserAsync() =>
         from d in db.Drivers
         join u in db.Users on d.UserId equals u.Id
-        select new ValueTuple<Domain.Drivers.Driver, string>(d, u.Name);
+        select new DriverUserRow { Driver = d, Name = u.Name };
+
+    // EF Core cannot translate ValueTuple projections to SQL (500 on list/profile).
+    private sealed class DriverUserRow
+    {
+        public Domain.Drivers.Driver Driver { get; set; } = null!;
+        public string Name { get; set; } = string.Empty;
+    }
 
     private static DriverResponse ToResponse(Domain.Drivers.Driver d, string? name) => new(
         d.Id, d.UserId, name ?? string.Empty, d.CityId, d.Cpf, d.VehicleType.ToString(), d.PixKeyType.ToString(),
