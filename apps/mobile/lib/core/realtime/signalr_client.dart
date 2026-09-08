@@ -1,5 +1,4 @@
-// ignore_for_file: prefer_initializing_formals — nomes de parâmetro mais
-// descritivos na API pública do que os nomes dos campos privados.
+// ignore_for_file: prefer_initializing_formals
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:logging/logging.dart' as logging;
 import 'package:signalr_netcore/signalr_client.dart';
@@ -7,23 +6,13 @@ import 'package:signalr_netcore/signalr_client.dart';
 import '../config/app_environment.dart';
 import '../storage/secure_storage_service.dart';
 
-/// Wrapper fino sobre `signalr_netcore` preparando a conexão com o hub
-/// SignalR do PedeLocal (`docs/FRONTEND_GUIDE.md#signalr`).
+/// Wrapper sobre `signalr_netcore` para o hub `{baseUrl}/hubs/pedelocal`
+/// (`docs/REALTIME_EVENTS.md`).
 ///
-/// Escopo desta etapa: apenas a infraestrutura de conexão fica pronta
-/// (conectar, escutar eventos por nome, reconectar com backoff, desconectar
-/// de forma limpa). Nenhuma tela desta etapa (splash/login/cadastro/seleção
-/// de cidade/home cliente/home entregador) assina eventos de pedido ou
-/// entrega ainda — isso pertence às próximas etapas (carrinho/checkout/
-/// acompanhamento de pedido/fluxo completo do entregador), conforme
-/// solicitado.
-///
-/// Importante (`docs/FRONTEND_GUIDE.md`): o servidor decide sozinho em quais
-/// grupos a conexão entra a partir do token — não existe (e não deve ser
-/// criado) um método `Subscribe`. Ao reconectar, a tela responsável deve
-/// sempre buscar o estado atual via REST (eventos perdidos durante a
-/// desconexão não são reenviados) — isso é responsabilidade de cada feature
-/// que futuramente escutar eventos, não deste cliente.
+/// O servidor atribui grupos a partir do JWT — o cliente nunca informa
+/// userId/establishmentId/driverId para entrar em grupo. O token vai pelo
+/// [HttpConnectionOptions.accessTokenFactory] (query `access_token` no
+/// handshake) e é relido a cada reconexão. Nunca é logado.
 class SignalRClient {
   SignalRClient({
     required AppEnvironment environment,
@@ -35,27 +24,29 @@ class SignalRClient {
   final SecureStorageService _secureStorage;
 
   HubConnection? _connection;
-
-  /// Handlers registrados via [on] — guardados aqui (e não só na conexão
-  /// nativa) para sobreviver a um ciclo explícito [disconnect] + [connect]
-  /// (ex.: logout seguido de login de outro usuário). Reconexões automáticas
-  /// (`withAutomaticReconnect`) preservam os handlers da conexão nativa por
-  /// conta própria; isto cobre o caso em que `on` é chamado antes do
-  /// primeiro [connect] ou depois de um [disconnect] explícito.
   final Map<String, void Function(List<Object?>? arguments)> _handlers = {};
+  final List<void Function()> _reconnectedListeners = [];
 
   HubConnectionState get state =>
       _connection?.state ?? HubConnectionState.Disconnected;
 
   bool get isConnected => state == HubConnectionState.Connected;
 
-  /// Conecta ao hub autenticando via access token (renovado sob demanda pelo
-  /// [AccessTokenFactory] a cada tentativa de conexão/reconexão — nunca
-  /// logado, nunca embutido "fixo" na URL).
   Future<void> connect() async {
-    if (_connection != null) return;
+    final existing = _connection;
+    if (existing != null) {
+      if (existing.state == HubConnectionState.Disconnected) {
+        await existing.start();
+      }
+      return;
+    }
+
+    final token = await _secureStorage.readAccessToken();
+    if (token == null || token.isEmpty) return;
 
     final logger = logging.Logger('SignalR');
+    logger.level = logging.Level.WARNING;
+
     final connection = HubConnectionBuilder()
         .withUrl(
           _environment.hubUrl,
@@ -66,23 +57,29 @@ class SignalRClient {
           ),
         )
         .withAutomaticReconnect(
-          retryDelays: [0, 2000, 5000, 10000, 20000, 30000],
+          retryDelays: const [0, 2000, 5000, 10000, 20000, 30000],
         )
         .configureLogging(logger)
         .build();
 
-    _connection = connection;
-    // Reaplica handlers registrados antes deste connect() (ex.: chamados
-    // durante a fase "desconectado", ou mantidos de um ciclo anterior).
     for (final entry in _handlers.entries) {
       connection.on(entry.key, entry.value);
     }
-    await connection.start();
+    connection.onreconnected(({String? connectionId}) {
+      for (final listener in List<void Function()>.from(_reconnectedListeners)) {
+        listener();
+      }
+    });
+
+    _connection = connection;
+    try {
+      await connection.start();
+    } catch (_) {
+      _connection = null;
+      rethrow;
+    }
   }
 
-  /// Registra um handler para um evento do hub (ver [SignalREvents]).
-  /// Seguro chamar antes de [connect] — o handler é aplicado assim que a
-  /// conexão existir.
   void on(String eventName, void Function(List<Object?>? arguments) handler) {
     _handlers[eventName] = handler;
     _connection?.on(eventName, handler);
@@ -93,8 +90,12 @@ class SignalRClient {
     _connection?.off(eventName);
   }
 
-  void onClose(void Function({Exception? error}) handler) {
-    _connection?.onclose(handler);
+  void addReconnectedListener(void Function() listener) {
+    _reconnectedListeners.add(listener);
+  }
+
+  void removeReconnectedListener(void Function() listener) {
+    _reconnectedListeners.remove(listener);
   }
 
   Future<void> disconnect() async {
