@@ -120,7 +120,9 @@ try
 
     builder.Services.AddSignalR();
 
-    var allowedOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? [];
+    var allowedOrigins = (builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? [])
+        .Where(origin => !string.IsNullOrWhiteSpace(origin))
+        .ToArray();
     builder.Services.AddCors(options =>
     {
         options.AddPolicy("Default", policy =>

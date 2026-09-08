@@ -19,6 +19,13 @@ Uma conexão sem token válido (ausente, expirado ou malformado) é rejeitada �
 o hub inteiro está sob `[Authorize]` (`PedeLocalHub`). Não há fallback
 anônimo.
 
+O browser chama o hub em origem cruzada (painel `:3000`/`:3001` → API
+`:8080`). Sem as origens em `Cors:AllowedOrigins`, o `negotiate` falha com
+`Failed to fetch`. Em Development o default é `http://localhost:3000` e
+`http://localhost:3001`. Em Docker/produção a lista começa vazia — preencha
+`CORS__ALLOWEDORIGINS__0` / `__1` no `.env` (ver `.env.example`). Não use
+`AllowAnyOrigin`.
+
 ## Grupos
 
 O servidor decide sozinho, a partir das claims do token e do banco, a quais

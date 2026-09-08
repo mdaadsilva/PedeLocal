@@ -32,6 +32,8 @@ services:
       Jwt__Audience: ${JWT__AUDIENCE:-PedeLocal.Client}
       Firebase__Enabled: ${FIREBASE__ENABLED:-false}
       Firebase__CredentialsJson: ${FIREBASE__CREDENTIALSJSON:-}
+      Cors__AllowedOrigins__0: ${CORS__ALLOWEDORIGINS__0:-}
+      Cors__AllowedOrigins__1: ${CORS__ALLOWEDORIGINS__1:-}
     ports:
       - "8080:8080"
 
