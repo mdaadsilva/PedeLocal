@@ -403,3 +403,69 @@ aplicadas contra o Postgres real do container (`InitialCreate`,
 confirmadas via `\dt`), `/scalar/v1` e `/openapi/v1.json` retornando 200
 com o security scheme `Bearer` presente, `dotnet build` com 0 erros, e
 `dotnet test` com **109/109 testes passando** (93 unit + 16 integration).
+
+## 19 — Tempo real/notificações: lacunas fechadas, sem novo evento de cancelamento
+
+A infraestrutura de SignalR (`PedeLocalHub`, `SignalRRealtimeNotifier`,
+grupos `customer:{id}`/`establishment:{id}`/`driver:{id}`/
+`city-drivers:{cityId}`) e a de notificações (`INotificationService`,
+`AppNotificationService`, `NoOpPushSender`) já existiam desta branch em
+diante. O trabalho desta etapa foi fechar lacunas reais, não recriar nada —
+ver `docs/REALTIME_EVENTS.md` para a referência completa do resultado.
+
+Lacunas encontradas e fechadas:
+
+- **First-accept-wins não invalidava a lista dos demais entregadores**:
+  `DeliveryAcceptedAsync` só notificava `establishment:{id}`. Passou a
+  também emitir `DeliveryAccepted` para `city-drivers:{cityId}` — **sem**
+  `driverId` no payload, para não vazar identidade do motorista vencedor
+  para quem não está vinculado à entrega. Reaproveita o nome de evento já
+  documentado (nenhum evento novo) — o cliente distingue os dois casos pela
+  presença ou não de `driverId`. O aceite em si continua atômico só no
+  banco (`Delivery.Version`); este evento é puramente um sinal de UI.
+- **Falha de notificação podia derrubar a operação principal**: nem
+  `SignalRRealtimeNotifier` nem `AppNotificationService` protegiam contra
+  exceção do transporte/provedor. Corrigido: `SignalRRealtimeNotifier`
+  captura e loga por envio individual (grupo+evento); `AppNotificationService`
+  persiste a linha em `notifications` antes de tentar o push e captura falha
+  do `IPushSender` sem deixar de salvar. Nenhuma dessas capturas loga dado
+  sensível (token, código de entrega, senha) — só tipo de evento e
+  identificadores.
+- **Notificações faltando** para eventos já cobertos por status reais do
+  domínio: `OrderCreated` nunca chegava ao staff do estabelecimento (só via
+  SignalR, sem persistência/push); `Preparing`, `OutForDelivery` e
+  `Cancelled` não geravam notificação ao cliente; `DeliveryAvailable` não
+  notificava entregadores offline/não conectados ao hub. Todas fechadas
+  reaproveitando `NotificationEventType` existente + 4 valores novos
+  (`OrderPreparing`, `OrderOutForDelivery`, `OrderCancelled` — persistidos
+  como `string`, então aditivos sem migração).
+
+Deliberadamente **não** adicionado:
+
+- Um evento `OrderCancelled`/`DeliveryStatusChanged` dedicado — o `status`
+  dentro de `OrderStatusChanged` já é suficiente (`"Cancelled"`,
+  `"PickedUp"`, `"OutForDelivery"` etc.); um evento extra só duplicaria a
+  mesma informação por outro nome.
+- Notificação para o estabelecimento quando ele mesmo cancela um pedido, ou
+  para o entregador quando ele mesmo aceita uma entrega — o ator de uma
+  ação não precisa ser notificado da própria ação.
+- Broadcast de localização em tempo real do entregador — fora de escopo,
+  não pedido por nenhum fluxo existente.
+- Um grupo/canal exclusivo para `SUPER_ADMIN` — manteria a regra "nenhum
+  comportamento implícito não documentado" para esse papel; acesso
+  administrativo de leitura continua só via REST.
+
+**Testes**: cobertura nova em três camadas — unit (`SignalRRealtimeNotifierTests`
+com um fake de `IHubContext` escrito à mão, já que a solução não usa
+biblioteca de mock; `AppNotificationServiceTests` para a resiliência de
+push; fan-out de notificação em `OrderServiceTests`/`DeliveryServiceTests`
+com `CapturingNotificationService`/`CapturingRealtimeNotifier`) e integração
+(`HubAuthorizationTests` — conexões SignalR **reais** contra o
+`WebApplicationFactory`, transporte LongPolling porque o `TestServer` não
+tem WebSocket real: conexão sem token rejeitada, isolamento por cliente,
+por estabelecimento e por cidade do entregador, todos verificados com um
+evento negativo *e* um positivo na mesma conexão para descartar falso
+negativo por conexão quebrada).
+
+Resultado: `dotnet build` limpo, `dotnet test` com **142/142 testes
+passando** (118 unit + 24 integration).

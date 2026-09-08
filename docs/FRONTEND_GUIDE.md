@@ -92,14 +92,17 @@ O servidor decide sozinho, a partir do token, em quais grupos a conexão
 entra (cliente nunca escolhe grupo) — não existe um método `Subscribe` para
 chamar.
 
-Eventos que o cliente deve escutar (`connection.on("EventName", handler)`):
+Referência completa (grupos, todos os eventos e payloads, notificações push,
+confiabilidade e o comportamento esperado de reconexão) em
+`docs/REALTIME_EVENTS.md`. Resumo dos eventos que o cliente deve escutar
+(`connection.on("EventName", handler)`):
 
 | Evento | Payload | Quem recebe |
 |---|---|---|
 | `OrderCreated` | `{ orderId }` | staff do estabelecimento |
 | `OrderStatusChanged` | `{ orderId, status }` | cliente do pedido + staff do estabelecimento |
-| `DeliveryAvailable` | `{ deliveryId }` | entregadores online da cidade |
-| `DeliveryAccepted` | `{ deliveryId, driverId }` | staff do estabelecimento |
+| `DeliveryAvailable` | `{ deliveryId }` | entregadores aprovados/disponíveis da cidade |
+| `DeliveryAccepted` | `{ deliveryId, driverId }` (staff) / `{ deliveryId }` sem `driverId` (demais entregadores da cidade) | staff do estabelecimento + entregadores da cidade (só para removerem da lista de disponíveis) |
 | `DeliveryCompleted` | `{ orderId }` | cliente do pedido + staff do estabelecimento |
 | `EstablishmentSuspended` | `{ establishmentId }` | staff do estabelecimento |
 
@@ -120,8 +123,9 @@ notificação em `GET /api/me/notifications`, mesmo sem token registrado).
 
 **Estado atual**: o envio real de push está com um `IPushSender` no-op
 (loga, não envia de verdade) até um projeto Firebase real ser configurado —
-ver `docs/DECISIONS.md`. O histórico de notificações (`/api/me/notifications`)
-já funciona independente disso.
+ver `docs/DECISIONS.md` e `docs/REALTIME_EVENTS.md#push-firebase`. O
+histórico de notificações (`/api/me/notifications`) já funciona
+independente disso.
 
 ## Enums de status (nomes exatos usados na API — sempre em `PascalCase`)
 

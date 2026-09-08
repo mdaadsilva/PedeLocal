@@ -100,7 +100,7 @@ public class DeliveryService(
             throw new ConflictException("DELIVERY_ALREADY_TAKEN", "Esta entrega já foi aceita por outro entregador.");
         }
 
-        await realtime.DeliveryAcceptedAsync(order.EstablishmentId, delivery.Id, driver.Id, ct);
+        await realtime.DeliveryAcceptedAsync(delivery.CityId, order.EstablishmentId, delivery.Id, driver.Id, ct);
         await realtime.OrderStatusChangedAsync(order.CustomerUserId, order.EstablishmentId, order.Id, order.Status.ToString(), ct);
         await notificationService.NotifyAsync(order.CustomerUserId, NotificationEventType.DeliveryAccepted,
             "Entregador a caminho!", "Um entregador aceitou seu pedido e vai retirá-lo em breve.", ct: ct);
@@ -151,6 +151,8 @@ public class DeliveryService(
 
         await db.SaveChangesAsync(ct);
         await realtime.OrderStatusChangedAsync(order.CustomerUserId, order.EstablishmentId, order.Id, order.Status.ToString(), ct);
+        await notificationService.NotifyAsync(order.CustomerUserId, NotificationEventType.OrderOutForDelivery,
+            "Pedido saiu para entrega!", "Seu pedido saiu para entrega e logo chega até você.", ct: ct);
         return ToResponse(delivery);
     }
 
