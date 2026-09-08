@@ -105,7 +105,36 @@ public class AuthService(IAppDbContext db, IPasswordHasher passwordHasher, IToke
             .Include(rt => rt.User).ThenInclude(u => u.UserRoles).ThenInclude(ur => ur.Role)
             .SingleOrDefaultAsync(rt => rt.TokenHash == tokenHash, ct);
 
-        if (existing is null || !existing.IsActive)
+        if (existing is null)
+        {
+            throw new UnauthorizedAppException("INVALID_REFRESH_TOKEN", "Sessão expirada. Faça login novamente.");
+        }
+
+        if (existing.RevokedAtUtc is not null)
+        {
+            // Reuse of a token that was already rotated away is a strong signal of theft (docs/AUTH_FLOW.md):
+            // it means someone else now holds a copy of a token this session already exchanged for a
+            // newer one. Revoke the entire live descendant chain — not just this dead token — so
+            // whoever is holding the stolen lineage gets logged out too, not just denied this one call.
+            await RevokeDescendantChainAsync(existing, ip, ct);
+            db.AuditLogs.Add(new Domain.Audit.AuditLog
+            {
+                ActorUserId = existing.UserId,
+                Action = Domain.Audit.AuditActions.RefreshTokenReuseDetected,
+                EntityType = nameof(User),
+                EntityId = existing.UserId,
+                Ip = ip
+            });
+            await db.SaveChangesAsync(ct);
+            throw new UnauthorizedAppException("INVALID_REFRESH_TOKEN", "Sessão expirada. Faça login novamente.");
+        }
+
+        if (existing.ExpiresAtUtc < DateTime.UtcNow)
+        {
+            throw new UnauthorizedAppException("INVALID_REFRESH_TOKEN", "Sessão expirada. Faça login novamente.");
+        }
+
+        if (!existing.User.IsActive)
         {
             throw new UnauthorizedAppException("INVALID_REFRESH_TOKEN", "Sessão expirada. Faça login novamente.");
         }
@@ -119,6 +148,29 @@ public class AuthService(IAppDbContext db, IPasswordHasher passwordHasher, IToke
         await db.SaveChangesAsync(ct);
 
         return tokens;
+    }
+
+    /// <summary>Walks the rotation chain forward from an already-revoked token via
+    /// ReplacedByTokenHash and revokes every still-active descendant — used when reuse of a dead
+    /// token is detected, to kill whatever live session descends from it.</summary>
+    private async Task RevokeDescendantChainAsync(RefreshToken token, string? ip, CancellationToken ct)
+    {
+        var nextHash = token.ReplacedByTokenHash;
+        var guard = 0; // defensive bound — rotation is a linear chain, this should never loop.
+        while (nextHash is not null && guard++ < 100)
+        {
+            var descendant = await db.RefreshTokens.SingleOrDefaultAsync(rt => rt.TokenHash == nextHash, ct);
+            if (descendant is null)
+            {
+                break;
+            }
+            if (descendant.RevokedAtUtc is null)
+            {
+                descendant.RevokedAtUtc = DateTime.UtcNow;
+                descendant.RevokedByIp = ip;
+            }
+            nextHash = descendant.ReplacedByTokenHash;
+        }
     }
 
     public async Task LogoutAsync(LogoutRequest request, string? ip, CancellationToken ct)

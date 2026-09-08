@@ -49,6 +49,7 @@ public class CreateProductRequestValidator : AbstractValidator<CreateProductRequ
             .When(x => x.PromotionalPrice.HasValue)
             .WithMessage("O preço promocional deve ser menor que o preço normal.");
         RuleFor(x => x.StockMode).NotEmpty();
+        RuleFor(x => x.StockQuantity).GreaterThanOrEqualTo(0).When(x => x.StockQuantity.HasValue);
         RuleForEach(x => x.OptionGroups).SetValidator(new ProductOptionGroupRequestValidator());
     }
 }

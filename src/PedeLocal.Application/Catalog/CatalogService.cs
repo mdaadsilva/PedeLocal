@@ -12,12 +12,15 @@ public class CatalogService(IAppDbContext db, ICurrentUserService currentUser, E
 {
     // --- Menu categories ---
 
-    public async Task<List<MenuCategoryResponse>> GetMenuCategoriesAsync(Guid establishmentId, CancellationToken ct) =>
-        await db.MenuCategories
+    public async Task<List<MenuCategoryResponse>> GetMenuCategoriesAsync(Guid establishmentId, CancellationToken ct)
+    {
+        await accessGuard.EnsureAccessAsync(establishmentId, ct);
+        return await db.MenuCategories
             .Where(c => c.EstablishmentId == establishmentId)
             .OrderBy(c => c.SortOrder).ThenBy(c => c.Name)
             .Select(c => new MenuCategoryResponse(c.Id, c.EstablishmentId, c.Name, c.SortOrder))
             .ToListAsync(ct);
+    }
 
     public async Task<MenuCategoryResponse> CreateMenuCategoryAsync(Guid establishmentId, CreateMenuCategoryRequest request, CancellationToken ct)
     {
@@ -44,16 +47,20 @@ public class CatalogService(IAppDbContext db, ICurrentUserService currentUser, E
 
     // --- Products ---
 
-    public async Task<List<ProductResponse>> GetProductsAsync(Guid establishmentId, CancellationToken ct) =>
-        await db.Products
+    public async Task<List<ProductResponse>> GetProductsAsync(Guid establishmentId, CancellationToken ct)
+    {
+        await accessGuard.EnsureAccessAsync(establishmentId, ct);
+        return await db.Products
             .Where(p => p.EstablishmentId == establishmentId)
             .Include(p => p.OptionGroups).ThenInclude(g => g.Options)
             .OrderBy(p => p.Name)
             .Select(p => ToResponse(p))
             .ToListAsync(ct);
+    }
 
     public async Task<ProductResponse> GetProductByIdAsync(Guid establishmentId, Guid productId, CancellationToken ct)
     {
+        await accessGuard.EnsureAccessAsync(establishmentId, ct);
         var product = await LoadProductAsync(establishmentId, productId, ct);
         return ToResponse(product);
     }

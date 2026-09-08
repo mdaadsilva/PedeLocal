@@ -8,7 +8,9 @@ public class AdjustStockRequestValidator : AbstractValidator<AdjustStockRequest>
     public AdjustStockRequestValidator()
     {
         RuleFor(x => x.Type).NotEmpty();
-        RuleFor(x => x.Quantity).GreaterThanOrEqualTo(0);
+        // Upper bound guards against absurd/overflow-adjacent values reaching the stock arithmetic
+        // in InventoryService — no legitimate manual adjustment needs anywhere near this.
+        RuleFor(x => x.Quantity).GreaterThanOrEqualTo(0).LessThanOrEqualTo(1_000_000);
         RuleFor(x => x.Reason).MaximumLength(500);
     }
 }

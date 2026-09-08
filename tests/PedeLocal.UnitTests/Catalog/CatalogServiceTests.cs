@@ -105,4 +105,67 @@ public class CatalogServiceTests
 
         Assert.Empty(publicProducts);
     }
+
+    // ---------------------------------------------------------------
+    // IDOR: merchant-scoped reads must stay staff/SuperAdmin-only (docs/SECURITY_AUDIT.md)
+    // ---------------------------------------------------------------
+
+    [Fact]
+    public async Task GetMenuCategories_AsNonStaff_Throws()
+    {
+        var (db, establishmentId, _, _) = await SeedAsync();
+        var user = new FakeCurrentUserService(Guid.NewGuid());
+        var sut = new CatalogService(db, user, new PedeLocal.Application.Common.EstablishmentAccessGuard(db, user));
+
+        await Assert.ThrowsAsync<ForbiddenException>(() => sut.GetMenuCategoriesAsync(establishmentId, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task GetProducts_AsNonStaff_Throws()
+    {
+        var (db, establishmentId, _, _) = await SeedAsync();
+        var user = new FakeCurrentUserService(Guid.NewGuid());
+        var sut = new CatalogService(db, user, new PedeLocal.Application.Common.EstablishmentAccessGuard(db, user));
+
+        await Assert.ThrowsAsync<ForbiddenException>(() => sut.GetProductsAsync(establishmentId, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task GetProductById_AsStaffOfAnotherEstablishment_Throws()
+    {
+        var (db, establishmentId, staffUserId, categoryId) = await SeedAsync();
+        var ownStaffSut = new CatalogService(db, new FakeCurrentUserService(staffUserId), new PedeLocal.Application.Common.EstablishmentAccessGuard(db, new FakeCurrentUserService(staffUserId)));
+        var product = await ownStaffSut.CreateProductAsync(establishmentId, BuildProductRequest(categoryId), CancellationToken.None);
+
+        // Staff of a DIFFERENT establishment — not SuperAdmin, not linked to this one.
+        var otherEstablishment = new Establishment
+        {
+            CityId = Guid.NewGuid(), Name = "Outra Loja", Slug = "outra-loja", Document = "2", Phone = "2", Email = "b@b.com",
+            CategoryId = Guid.NewGuid(), AddressId = Guid.NewGuid()
+        };
+        db.Establishments.Add(otherEstablishment);
+        var otherStaffUserId = Guid.NewGuid();
+        db.EstablishmentUsers.Add(new EstablishmentUser { EstablishmentId = otherEstablishment.Id, UserId = otherStaffUserId, StaffRole = RoleNames.EstablishmentAdmin });
+        await db.SaveChangesAsync();
+
+        var intruderUser = new FakeCurrentUserService(otherStaffUserId);
+        var intruderSut = new CatalogService(db, intruderUser, new PedeLocal.Application.Common.EstablishmentAccessGuard(db, intruderUser));
+
+        await Assert.ThrowsAsync<ForbiddenException>(() => intruderSut.GetProductsAsync(establishmentId, CancellationToken.None));
+        await Assert.ThrowsAsync<ForbiddenException>(() => intruderSut.GetProductByIdAsync(establishmentId, product.Id, CancellationToken.None));
+        await Assert.ThrowsAsync<ForbiddenException>(() => intruderSut.GetMenuCategoriesAsync(establishmentId, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task GetProducts_AsOwnStaff_StillSucceeds()
+    {
+        var (db, establishmentId, staffUserId, categoryId) = await SeedAsync();
+        var user = new FakeCurrentUserService(staffUserId);
+        var sut = new CatalogService(db, user, new PedeLocal.Application.Common.EstablishmentAccessGuard(db, user));
+        await sut.CreateProductAsync(establishmentId, BuildProductRequest(categoryId), CancellationToken.None);
+
+        var products = await sut.GetProductsAsync(establishmentId, CancellationToken.None);
+
+        Assert.Single(products);
+    }
 }

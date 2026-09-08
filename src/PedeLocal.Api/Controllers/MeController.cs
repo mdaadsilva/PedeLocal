@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using PedeLocal.Application.Me;
 using PedeLocal.Application.Notifications;
 using PedeLocal.Contracts.Common;
@@ -26,6 +27,7 @@ public class MeController(MeService meService, DeviceTokenService deviceTokenSer
     /// every app start/token rotation. Idempotent: same token twice just updates it, never
     /// duplicates. See docs/PUSH_NOTIFICATIONS.md.</summary>
     [HttpPut("device-tokens")]
+    [EnableRateLimiting("auth")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     public async Task<IActionResult> RegisterDeviceToken(RegisterDeviceTokenRequest request, CancellationToken ct)
     {
@@ -36,6 +38,7 @@ public class MeController(MeService meService, DeviceTokenService deviceTokenSer
     /// <summary>Removes one device token — call on logout/uninstall so that device stops receiving
     /// push. Idempotent no-op if the token isn't registered to the caller.</summary>
     [HttpDelete("device-tokens")]
+    [EnableRateLimiting("auth")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     public async Task<IActionResult> RemoveDeviceToken(RemoveDeviceTokenRequest request, CancellationToken ct)
     {

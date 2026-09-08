@@ -21,5 +21,10 @@ public class Product : BaseEntity
     public int? StockQuantity { get; set; }
     public bool IsAvailable { get; set; } = true;
 
+    /// <summary>Optimistic concurrency token, manually incremented on every StockQuantity change
+    /// (same pattern as Delivery.Version) — guards against a lost-update race when two orders for
+    /// the same Controlled-stock product are accepted concurrently (docs/SECURITY_AUDIT.md).</summary>
+    public int Version { get; set; }
+
     public ICollection<ProductOptionGroup> OptionGroups { get; set; } = new List<ProductOptionGroup>();
 }

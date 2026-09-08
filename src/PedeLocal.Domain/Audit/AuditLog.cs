@@ -10,6 +10,7 @@ public static class AuditActions
     public const string EstablishmentReactivated = "ESTABLISHMENT_REACTIVATED";
     public const string PaymentRegistered = "PAYMENT_REGISTERED";
     public const string FeatureChanged = "FEATURE_CHANGED";
+    public const string RefreshTokenReuseDetected = "REFRESH_TOKEN_REUSE_DETECTED";
 }
 
 public class AuditLog
