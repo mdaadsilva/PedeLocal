@@ -244,7 +244,7 @@ jobs:
 
       - name: Run k6 smoke suite
         working-directory: tests/performance
-        run: ./run-smoke.sh
+        run: bash ./run-smoke.sh
 
       - name: Upload k6 results
         if: always()
