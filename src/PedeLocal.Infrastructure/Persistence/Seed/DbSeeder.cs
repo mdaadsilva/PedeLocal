@@ -8,7 +8,13 @@ namespace PedeLocal.Infrastructure.Persistence.Seed;
 public static class DbSeeder
 {
     private static readonly string[] DefaultEstablishmentCategories =
-        ["Mercado", "Lanchonete", "Adega", "Pizzaria", "Padaria", "Açougue"];
+    [
+        "Mercado", "Lanchonete", "Adega", "Pizzaria", "Padaria", "Açougue",
+        // Added alongside the Development-only demo data seeder (docs/DEMO_DATA.md) to cover every
+        // establishment type it generates — reference data, seeded in every environment like the
+        // categories above, never gated to Development.
+        "Supermercado", "Restaurante", "Farmácia", "Conveniência", "Hortifruti", "Hamburgueria"
+    ];
 
     public static async Task SeedRolesAsync(PedeLocalDbContext db, CancellationToken ct = default)
     {

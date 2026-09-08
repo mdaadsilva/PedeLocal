@@ -39,6 +39,30 @@ try
     // Development/Staging/Production behavior changes.
     var isTestingEnvironment = builder.Environment.IsEnvironment("Testing");
 
+    // --seed-demo / --reset-demo (optional --profile Small|Demo|Large, default Demo) — Development-only
+    // demo data generator, see docs/DEMO_DATA.md. Parsed here, before AddApplication/AddInfrastructure
+    // even run, so an accidental invocation outside Development fails fast — before building the rest
+    // of the host (Hangfire included) — rather than after. This is the FIRST of two independent
+    // guards; DemoDataSeeder itself re-checks independently before touching the database.
+    var seedDemo = args.Contains("--seed-demo");
+    var resetDemo = args.Contains("--reset-demo");
+    var demoProfile = PedeLocal.Infrastructure.Persistence.Seed.Demo.DemoSeedProfile.Demo;
+    var profileArgIndex = Array.IndexOf(args, "--profile");
+    if (profileArgIndex >= 0 && profileArgIndex + 1 < args.Length && !Enum.TryParse(args[profileArgIndex + 1], ignoreCase: true, out demoProfile))
+    {
+        Log.Fatal("Invalid --profile value '{Value}' — expected Small, Demo or Large.", args[profileArgIndex + 1]);
+        Log.CloseAndFlush();
+        Environment.Exit(1);
+    }
+    if ((seedDemo || resetDemo) && !builder.Environment.IsDevelopment())
+    {
+        Log.Fatal(
+            "--seed-demo/--reset-demo only run when ASPNETCORE_ENVIRONMENT=Development (current: '{Environment}'). Refusing.",
+            builder.Environment.EnvironmentName);
+        Log.CloseAndFlush();
+        Environment.Exit(1);
+    }
+
     builder.Host.UseSerilog((context, services, configuration) => configuration
         .ReadFrom.Configuration(context.Configuration)
         .ReadFrom.Services(services)
@@ -193,6 +217,31 @@ try
         {
             var passwordHasher = scope.ServiceProvider.GetRequiredService<PedeLocal.Application.Identity.IPasswordHasher>();
             await DevelopmentDataSeeder.SeedAsync(db, passwordHasher);
+
+            // Second, independent guard (defense in depth) — see the comment on the CLI parsing
+            // above and on DemoDataSeeder itself.
+            if ((seedDemo || resetDemo) && app.Environment.IsDevelopment())
+            {
+                if (resetDemo)
+                {
+                    Log.Information("Resetting demo data (profile {Profile})...", demoProfile);
+                    await PedeLocal.Infrastructure.Persistence.Seed.Demo.DemoDataSeeder.ResetAsync(db, demoProfile, app.Environment.EnvironmentName);
+                    Log.Information("Demo data reset complete.");
+                }
+
+                if (seedDemo)
+                {
+                    Log.Information("Seeding demo data (profile {Profile})...", demoProfile);
+                    var tokenService = scope.ServiceProvider.GetRequiredService<PedeLocal.Application.Identity.ITokenService>();
+                    var codeCipher = scope.ServiceProvider.GetRequiredService<PedeLocal.Application.Deliveries.IDeliveryCodeCipher>();
+                    var demoResult = await PedeLocal.Infrastructure.Persistence.Seed.Demo.DemoDataSeeder.SeedAsync(
+                        db, passwordHasher, tokenService, codeCipher, demoProfile, app.Environment.EnvironmentName);
+                    PrintDemoSeedSummary(demoResult);
+                }
+
+                Log.CloseAndFlush();
+                return;
+            }
         }
     }
 
@@ -281,6 +330,28 @@ try
 finally
 {
     Log.CloseAndFlush();
+}
+
+/// <summary>Human-readable console report after `--seed-demo` — counts plus the ready-to-use
+/// credentials table. Deliberately plain Console output (not structured Serilog) since this is
+/// meant to be read/copy-pasted by the developer running the command. See docs/DEMO_DATA.md.</summary>
+static void PrintDemoSeedSummary(PedeLocal.Infrastructure.Persistence.Seed.Demo.DemoSeedResult result)
+{
+    Console.WriteLine();
+    Console.WriteLine($"=== PedeLocal Demo Data — profile: {result.Profile} ===");
+    foreach (var (label, count) in result.Counts)
+    {
+        Console.WriteLine($"  {label}: {count}");
+    }
+    Console.WriteLine($"  Estabelecimentos sem assinatura configurada (cenário proposital): {result.EstablishmentsWithoutSubscription}");
+    Console.WriteLine();
+    Console.WriteLine($"Credenciais de login (senha: {PedeLocal.Infrastructure.Persistence.Seed.DevelopmentDataSeeder.DevPassword})");
+    Console.WriteLine($"{"ROLE",-20} {"CIDADE",-16} {"E-MAIL",-40} {"ESTABELECIMENTO",-30}");
+    foreach (var row in result.Credentials)
+    {
+        Console.WriteLine($"{row.Role,-20} {row.City,-16} {row.Email,-40} {row.EstablishmentName ?? "—",-30}");
+    }
+    Console.WriteLine();
 }
 
 // Makes the top-level-statements-generated Program class visible to
