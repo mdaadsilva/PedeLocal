@@ -8,18 +8,17 @@ import { listAllEstablishments } from "@/features/establishments/api";
 import { SUBSCRIPTION_STATUS_LABEL, labelOf } from "@/features/orders/labels";
 import { getSubscriptionOrNull } from "@/features/subscriptions/api";
 import { addDaysToDateOnly, formatCurrency, formatDateOnly } from "@/lib/formatters";
+import { mapPool } from "@/lib/pool";
 
 export default function SubscriptionsPage() {
   const query = useQuery({
     queryKey: ["admin", "subscriptions", "overview"],
     queryFn: async () => {
       const establishments = await listAllEstablishments();
-      const subscriptions = await Promise.all(
-        establishments.map(async (item) => ({
-          establishment: item,
-          subscription: await getSubscriptionOrNull(item.id),
-        })),
-      );
+      const subscriptions = await mapPool(establishments, 4, async (item) => ({
+        establishment: item,
+        subscription: await getSubscriptionOrNull(item.id),
+      }));
       return subscriptions;
     },
   });

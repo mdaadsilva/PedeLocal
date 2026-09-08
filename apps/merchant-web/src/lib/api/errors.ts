@@ -11,6 +11,13 @@ export class ApiError extends Error {
 }
 
 export function parseApiError(payload: unknown, status: number) {
+  if (status === 429) {
+    return new ApiError(
+      "RATE_LIMITED",
+      "Muitas requisições. Aguarde um minuto e tente de novo.",
+      429,
+    );
+  }
   if (payload && typeof payload === "object") {
     const body = payload as {
       code?: string;
