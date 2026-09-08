@@ -24,6 +24,11 @@ publish/
 .env.*
 !.env.example
 
+## Firebase client configs (generated in Console — never commit)
+**/google-services.json
+**/GoogleService-Info.plist
+**/firebase_app_id_file.json
+
 ## Logs
 logs/
 *.log

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/network/app_exception.dart';
+import '../../../core/notifications/recent_notification_feedback.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_radius.dart';
 import '../../../core/theme/app_spacing.dart';
@@ -35,6 +36,10 @@ class OrderTrackingScreen extends ConsumerWidget {
       if (previousStatus == null ||
           nextStatus == null ||
           previousStatus == nextStatus) {
+        return;
+      }
+      final feedback = ref.read(recentNotificationFeedbackProvider);
+      if (!feedback.claim('order:$orderId')) {
         return;
       }
       ScaffoldMessenger.of(context).showSnackBar(

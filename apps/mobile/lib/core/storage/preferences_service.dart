@@ -15,6 +15,8 @@ class PreferencesService {
 
   static const _lastCityIdKey = 'pedelocal.last_city_id';
   static const _lastCityNameKey = 'pedelocal.last_city_name';
+  static const _notificationPermissionAskedKey =
+      'pedelocal.notification_permission_asked';
 
   String? get lastCityId => _prefs.getString(_lastCityIdKey);
 
@@ -29,6 +31,14 @@ class PreferencesService {
     await _prefs.remove(_lastCityIdKey);
     await _prefs.remove(_lastCityNameKey);
   }
+
+  /// Permissão de notificação já foi pedida uma vez — não repetir de
+  /// forma agressiva (Android 13+ / iOS).
+  bool get notificationPermissionAsked =>
+      _prefs.getBool(_notificationPermissionAskedKey) ?? false;
+
+  Future<void> markNotificationPermissionAsked() =>
+      _prefs.setBool(_notificationPermissionAskedKey, true);
 
   // ---------------------------------------------------------------------
   // Carrinho — dado não sensível (nenhum token/senha/dado de pagamento é

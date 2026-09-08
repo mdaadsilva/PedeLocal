@@ -2,9 +2,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:pedelocal_mobile/core/config/app_environment.dart';
+import 'package:pedelocal_mobile/core/notifications/push_notification_service.dart';
 import 'package:pedelocal_mobile/core/realtime/realtime_connection_controller.dart';
 import 'package:pedelocal_mobile/core/realtime/signalr_client.dart';
 import 'package:pedelocal_mobile/core/storage/secure_storage_service.dart';
+
+import '../notifications/fake_push_token_lifecycle.dart';
 import 'package:pedelocal_mobile/features/auth/data/auth_repository.dart';
 import 'package:pedelocal_mobile/features/me/data/me_repository.dart';
 import 'package:pedelocal_mobile/features/me/domain/my_profile.dart';
@@ -54,6 +57,7 @@ void main() {
         meRepositoryProvider.overrideWithValue(meRepository),
         authRepositoryProvider.overrideWithValue(authRepository),
         signalRClientProvider.overrideWithValue(signalR),
+        pushTokenLifecycleProvider.overrideWithValue(FakePushTokenLifecycle()),
       ],
     );
     addTearDown(container.dispose);
