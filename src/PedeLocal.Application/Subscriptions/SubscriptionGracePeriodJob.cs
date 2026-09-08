@@ -88,7 +88,8 @@ public class SubscriptionGracePeriodJob(IAppDbContext db, IRealtimeNotifier real
                 suspended
                     ? "Sua assinatura foi suspensa por falta de pagamento. Novos pedidos estão bloqueados até a regularização."
                     : "Sua mensalidade venceu. Regularize o pagamento para evitar a suspensão da loja.",
-                ct: ct);
+                new Dictionary<string, string> { ["establishmentId"] = establishmentId.ToString(), ["eventType"] = nameof(NotificationEventType.SubscriptionWarning) },
+                ct);
         }
     }
 

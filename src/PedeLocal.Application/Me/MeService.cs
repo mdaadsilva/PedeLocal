@@ -26,13 +26,6 @@ public class MeService(IAppDbContext db, ICurrentUserService currentUser)
         return await GetProfileAsync(ct);
     }
 
-    public async Task UpdateFcmTokenAsync(UpdateFcmTokenRequest request, CancellationToken ct)
-    {
-        var user = await LoadOwnUserAsync(ct);
-        user.FcmToken = string.IsNullOrWhiteSpace(request.Token) ? null : request.Token.Trim();
-        await db.SaveChangesAsync(ct);
-    }
-
     public async Task<PagedResult<NotificationResponse>> GetNotificationsAsync(PageRequest request, CancellationToken ct)
     {
         var userId = RequireUserId();
@@ -82,7 +75,6 @@ public class MeService(IAppDbContext db, ICurrentUserService currentUser)
         user.Email = $"deleted-{user.Id}@pedelocal.invalid";
         user.PhoneNumber = "";
         user.PasswordHash = Guid.NewGuid().ToString("N");
-        user.FcmToken = null;
         user.IsActive = false;
         user.DeletedAtUtc = DateTime.UtcNow;
 
@@ -91,6 +83,10 @@ public class MeService(IAppDbContext db, ICurrentUserService currentUser)
         {
             session.RevokedAtUtc = DateTime.UtcNow;
         }
+
+        // No more push to a deactivated/anonymized account.
+        var deviceTokens = await db.DeviceTokens.Where(t => t.UserId == user.Id).ToListAsync(ct);
+        db.DeviceTokens.RemoveRange(deviceTokens);
 
         await db.SaveChangesAsync(ct);
     }

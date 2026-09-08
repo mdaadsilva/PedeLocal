@@ -112,20 +112,31 @@ desconexão não são reenviados.
 
 ## Push notifications (FCM)
 
+Referência completa em `docs/PUSH_NOTIFICATIONS.md`. Resumo:
+
 ```http
-PUT /api/me/fcm-token
+PUT /api/me/device-tokens
+{ "token": "<token do Firebase Cloud Messaging>", "platform": "Ios" }   -- ou "Android" | "Web"
+
+DELETE /api/me/device-tokens
 { "token": "<token do Firebase Cloud Messaging>" }
 ```
 
-Chame isso sempre que o token do FCM for gerado/rotacionado pelo app. O
-backend usa esse token para push (evento correspondente também vira uma
-notificação em `GET /api/me/notifications`, mesmo sem token registrado).
+Chame `PUT` sempre que o token do FCM for gerado/rotacionado pelo app —
+idempotente, então pode ser chamado em todo start do app sem se preocupar
+com duplicar. Um mesmo usuário pode ter vários tokens simultâneos (um por
+dispositivo); chame `DELETE` no logout/desinstalação para parar de receber
+push naquele aparelho especificamente.
 
-**Estado atual**: o envio real de push está com um `IPushSender` no-op
-(loga, não envia de verdade) até um projeto Firebase real ser configurado —
-ver `docs/DECISIONS.md` e `docs/REALTIME_EVENTS.md#push-firebase`. O
-histórico de notificações (`/api/me/notifications`) já funciona
-independente disso.
+Cada evento que gera push também vira uma notificação em
+`GET /api/me/notifications`, mesmo sem nenhum token registrado ou com o
+provedor fora do ar — o histórico nunca depende do push ter funcionado.
+
+**Estado atual**: o backend já integra o Firebase Admin SDK de verdade —
+`IPushSender` só cai de volta para o modo no-op (loga, não envia) quando
+`Firebase:Enabled` não está configurado (o padrão, até um projeto Firebase
+real existir). Ver `docs/PUSH_NOTIFICATIONS.md` para variáveis de ambiente
+e passos no Firebase Console.
 
 ## Enums de status (nomes exatos usados na API — sempre em `PascalCase`)
 

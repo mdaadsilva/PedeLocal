@@ -11,6 +11,7 @@ using PedeLocal.Application.Finance;
 using PedeLocal.Application.Identity;
 using PedeLocal.Application.Inventory;
 using PedeLocal.Application.Me;
+using PedeLocal.Application.Notifications;
 using PedeLocal.Application.Orders;
 using PedeLocal.Application.Pricing;
 using PedeLocal.Application.Subscriptions;
@@ -40,6 +41,7 @@ public static class DependencyInjection
         services.AddScoped<SubscriptionGracePeriodJob>();
         services.AddScoped<AdminService>();
         services.AddScoped<MeService>();
+        services.AddScoped<DeviceTokenService>();
 
         return services;
     }

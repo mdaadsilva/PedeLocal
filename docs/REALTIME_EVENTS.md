@@ -128,25 +128,15 @@ double-submit/retry.
 
 ### Push (Firebase)
 
-`IPushSender` é a abstração sobre o provedor real (Firebase Cloud
-Messaging). **Não há projeto Firebase configurado ainda** — a implementação
-registrada em `Infrastructure/DependencyInjection.cs` é `NoOpPushSender`
-(loga e não envia). Nenhuma credencial falsa foi inserida em lugar nenhum.
-
-Para ativar push de verdade quando houver um projeto Firebase real:
-
-1. Gerar a service account JSON do projeto Firebase.
-2. Implementar um `FirebaseAdminPushSender : IPushSender` em
-   `PedeLocal.Infrastructure/Notifications/` usando o SDK `FirebaseAdmin`,
-   lendo a credencial de configuração/secret (nunca commitada).
-3. Trocar o registro em `AddInfrastructure`:
-   `services.AddSingleton<IPushSender, FirebaseAdminPushSender>();`
-
-Nenhuma outra camada muda — `INotificationService`, os `NotificationEventType`
-e todos os call sites em `OrderService`/`DeliveryService` continuam iguais.
-
-`PUT /api/me/fcm-token` já está pronto para receber o token do device desde
-já; ele só fica sem uso prático até o passo acima ser feito.
+Referência completa (device tokens, endpoints, variáveis de ambiente,
+configuração do Firebase Console) em `docs/PUSH_NOTIFICATIONS.md` — este
+documento cobre só o transporte SignalR. Resumo: `IPushSender` é a
+abstração sobre o provedor real (Firebase Cloud Messaging), com uma
+implementação real (`FirebaseFcmPushSender`) e um fallback no-op
+(`NoOpPushSender`) usado sempre que `Firebase:Enabled` não está configurado
+— nenhuma credencial falsa foi inserida em lugar nenhum, e nenhuma camada
+de negócio (`INotificationService`, `OrderService`, `DeliveryService`)
+precisa saber qual das duas está ativa.
 
 ## Confiabilidade
 

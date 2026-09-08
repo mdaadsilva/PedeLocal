@@ -5,6 +5,6 @@ namespace PedeLocal.UnitTests.TestSupport;
 
 public class NoOpNotificationService : INotificationService
 {
-    public Task NotifyAsync(Guid userId, NotificationEventType type, string title, string body, string? dataJson = null, CancellationToken ct = default) =>
+    public Task NotifyAsync(Guid userId, NotificationEventType type, string title, string body, IDictionary<string, string>? data = null, CancellationToken ct = default) =>
         Task.CompletedTask;
 }

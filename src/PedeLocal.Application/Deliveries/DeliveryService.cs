@@ -103,7 +103,8 @@ public class DeliveryService(
         await realtime.DeliveryAcceptedAsync(delivery.CityId, order.EstablishmentId, delivery.Id, driver.Id, ct);
         await realtime.OrderStatusChangedAsync(order.CustomerUserId, order.EstablishmentId, order.Id, order.Status.ToString(), ct);
         await notificationService.NotifyAsync(order.CustomerUserId, NotificationEventType.DeliveryAccepted,
-            "Entregador a caminho!", "Um entregador aceitou seu pedido e vai retirá-lo em breve.", ct: ct);
+            "Entregador a caminho!", "Um entregador aceitou seu pedido e vai retirá-lo em breve.",
+            EventData(order.Id, delivery.Id, NotificationEventType.DeliveryAccepted), ct);
 
         return ToResponse(delivery);
     }
@@ -152,7 +153,8 @@ public class DeliveryService(
         await db.SaveChangesAsync(ct);
         await realtime.OrderStatusChangedAsync(order.CustomerUserId, order.EstablishmentId, order.Id, order.Status.ToString(), ct);
         await notificationService.NotifyAsync(order.CustomerUserId, NotificationEventType.OrderOutForDelivery,
-            "Pedido saiu para entrega!", "Seu pedido saiu para entrega e logo chega até você.", ct: ct);
+            "Pedido saiu para entrega!", "Seu pedido saiu para entrega e logo chega até você.",
+            EventData(order.Id, delivery.Id, NotificationEventType.OrderOutForDelivery), ct);
         return ToResponse(delivery);
     }
 
@@ -216,7 +218,8 @@ public class DeliveryService(
         await realtime.OrderStatusChangedAsync(order.CustomerUserId, order.EstablishmentId, order.Id, order.Status.ToString(), ct);
         await realtime.DeliveryCompletedAsync(order.CustomerUserId, order.EstablishmentId, order.Id, ct);
         await notificationService.NotifyAsync(order.CustomerUserId, NotificationEventType.OrderDelivered,
-            "Pedido entregue!", "Seu pedido foi entregue. Bom apetite!", ct: ct);
+            "Pedido entregue!", "Seu pedido foi entregue. Bom apetite!",
+            EventData(order.Id, delivery.Id, NotificationEventType.OrderDelivered), ct);
         return ToResponse(delivery);
     }
 
@@ -251,6 +254,16 @@ public class DeliveryService(
             new DeliveryDetailEstablishmentResponse(establishment.Id, establishment.Name, establishment.Phone, ToAddressResponse(establishmentAddress)),
             ToAddressResponse(deliveryAddress));
     }
+
+    /// <summary>Minimal push/notification data payload for delivery-driven events — just the order
+    /// and delivery ids and the event type name, never anything the customer wouldn't already see by
+    /// opening the app (docs/PUSH_NOTIFICATIONS.md).</summary>
+    private static Dictionary<string, string> EventData(Guid orderId, Guid deliveryId, NotificationEventType type) => new()
+    {
+        ["orderId"] = orderId.ToString(),
+        ["deliveryId"] = deliveryId.ToString(),
+        ["eventType"] = type.ToString()
+    };
 
     private static AddressResponse ToAddressResponse(Address a) => new(
         a.Id, a.CityId, a.Type.ToString(), a.Label, a.Street, a.Number, a.District, a.Complement,

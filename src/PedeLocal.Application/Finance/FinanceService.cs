@@ -94,7 +94,8 @@ public class FinanceService(
             if (driverUserId != Guid.Empty)
             {
                 await notificationService.NotifyAsync(driverUserId, NotificationEventType.PaymentReported,
-                    "Pagamento reportado", $"O estabelecimento reportou o pagamento de R$ {batch.TotalAmount:F2}. Confirme o recebimento.", ct: ct);
+                    "Pagamento reportado", $"O estabelecimento reportou o pagamento de R$ {batch.TotalAmount:F2}. Confirme o recebimento.",
+                    new Dictionary<string, string> { ["batchId"] = batch.Id.ToString(), ["eventType"] = nameof(NotificationEventType.PaymentReported) }, ct);
             }
         }
 

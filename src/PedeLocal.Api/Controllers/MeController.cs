@@ -1,15 +1,17 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using PedeLocal.Application.Me;
+using PedeLocal.Application.Notifications;
 using PedeLocal.Contracts.Common;
 using PedeLocal.Contracts.Me;
+using PedeLocal.Contracts.Notifications;
 
 namespace PedeLocal.Api.Controllers;
 
 [ApiController]
 [Route("api/me")]
 [Authorize]
-public class MeController(MeService meService) : ControllerBase
+public class MeController(MeService meService, DeviceTokenService deviceTokenService) : ControllerBase
 {
     [HttpGet("profile")]
     [ProducesResponseType(typeof(MyProfileResponse), StatusCodes.Status200OK)]
@@ -20,11 +22,24 @@ public class MeController(MeService meService) : ControllerBase
     public async Task<IActionResult> UpdateProfile(UpdateProfileRequest request, CancellationToken ct) =>
         Ok(await meService.UpdateProfileAsync(request, ct));
 
-    [HttpPut("fcm-token")]
+    /// <summary>Registers (or refreshes) one device's FCM token for push notifications — call on
+    /// every app start/token rotation. Idempotent: same token twice just updates it, never
+    /// duplicates. See docs/PUSH_NOTIFICATIONS.md.</summary>
+    [HttpPut("device-tokens")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
-    public async Task<IActionResult> UpdateFcmToken(UpdateFcmTokenRequest request, CancellationToken ct)
+    public async Task<IActionResult> RegisterDeviceToken(RegisterDeviceTokenRequest request, CancellationToken ct)
     {
-        await meService.UpdateFcmTokenAsync(request, ct);
+        await deviceTokenService.RegisterAsync(request, ct);
+        return NoContent();
+    }
+
+    /// <summary>Removes one device token — call on logout/uninstall so that device stops receiving
+    /// push. Idempotent no-op if the token isn't registered to the caller.</summary>
+    [HttpDelete("device-tokens")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    public async Task<IActionResult> RemoveDeviceToken(RemoveDeviceTokenRequest request, CancellationToken ct)
+    {
+        await deviceTokenService.RemoveAsync(request, ct);
         return NoContent();
     }
 
