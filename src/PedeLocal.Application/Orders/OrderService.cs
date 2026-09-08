@@ -241,11 +241,14 @@ public class OrderService(
         }
 
         await DeductStockAsync(order, ct);
-        await TransitionAsync(order, OrderStatus.Accepted, ct);
-        await notificationService.NotifyAsync(order.CustomerUserId, NotificationEventType.OrderAccepted,
-            "Pedido aceito!", "O estabelecimento aceitou seu pedido e vai começar a preparar.",
-            EventData(order.Id, NotificationEventType.OrderAccepted), ct);
-        return ToResponse(order);
+        var outcome = await TransitionAsync(order, OrderStatus.Accepted, ct);
+        if (outcome.AppliedByThisCall)
+        {
+            await notificationService.NotifyAsync(order.CustomerUserId, NotificationEventType.OrderAccepted,
+                "Pedido aceito!", "O estabelecimento aceitou seu pedido e vai começar a preparar.",
+                EventData(order.Id, NotificationEventType.OrderAccepted), ct);
+        }
+        return outcome.Response;
     }
 
     public async Task<OrderResponse> MarkPreparingAsync(Guid establishmentId, Guid orderId, CancellationToken ct)
@@ -262,11 +265,14 @@ public class OrderService(
             throw new ConflictException("INVALID_ORDER_TRANSITION", $"Pedido não pode ir para preparo a partir do status {order.Status}.");
         }
 
-        await TransitionAsync(order, OrderStatus.Preparing, ct);
-        await notificationService.NotifyAsync(order.CustomerUserId, NotificationEventType.OrderPreparing,
-            "Pedido em preparo!", "O estabelecimento começou a preparar seu pedido.",
-            EventData(order.Id, NotificationEventType.OrderPreparing), ct);
-        return ToResponse(order);
+        var outcome = await TransitionAsync(order, OrderStatus.Preparing, ct);
+        if (outcome.AppliedByThisCall)
+        {
+            await notificationService.NotifyAsync(order.CustomerUserId, NotificationEventType.OrderPreparing,
+                "Pedido em preparo!", "O estabelecimento começou a preparar seu pedido.",
+                EventData(order.Id, NotificationEventType.OrderPreparing), ct);
+        }
+        return outcome.Response;
     }
 
     public async Task<OrderResponse> MarkReadyAsync(Guid establishmentId, Guid orderId, CancellationToken ct)
@@ -287,11 +293,14 @@ public class OrderService(
         {
             // No Delivery/DeliveryConfirmation for pickup — there is no driver leg to confirm.
             // The customer collects in person; the merchant closes the loop via CompletePickupAsync.
-            await TransitionAsync(order, OrderStatus.Ready, ct);
-            await notificationService.NotifyAsync(order.CustomerUserId, NotificationEventType.OrderReady,
-                "Pedido pronto!", "Seu pedido está pronto para retirada no estabelecimento.",
-                EventData(order.Id, NotificationEventType.OrderReady), ct);
-            return ToResponse(order);
+            var pickupOutcome = await TransitionAsync(order, OrderStatus.Ready, ct);
+            if (pickupOutcome.AppliedByThisCall)
+            {
+                await notificationService.NotifyAsync(order.CustomerUserId, NotificationEventType.OrderReady,
+                    "Pedido pronto!", "Seu pedido está pronto para retirada no estabelecimento.",
+                    EventData(order.Id, NotificationEventType.OrderReady), ct);
+            }
+            return pickupOutcome.Response;
         }
 
         await TransitionAsync(order, OrderStatus.Ready, ct, save: false);
@@ -325,9 +334,18 @@ public class OrderService(
         }
 
         order.Status = OrderStatus.WaitingDriver;
+        order.Version++;
         db.OrderStatusHistories.Add(new OrderStatusHistory { OrderId = order.Id, Status = OrderStatus.WaitingDriver, ChangedByUserId = currentUser.UserId });
 
-        await db.SaveChangesAsync(ct);
+        var readyOutcome = await SaveTransitionAsync(order, OrderStatus.WaitingDriver, ct);
+        if (!readyOutcome.AppliedByThisCall)
+        {
+            // A concurrent `ready` call already won — the Delivery/DeliveryConfirmation this
+            // attempt tried to create were discarded along with everything else (SaveTransitionAsync
+            // rolled back nothing was ever persisted); the winner already sent its own
+            // realtime/notification/DeliveryAvailable side effects, so this call must not repeat them.
+            return readyOutcome.Response;
+        }
 
         await realtime.OrderStatusChangedAsync(order.CustomerUserId, order.EstablishmentId, order.Id, order.Status.ToString(), ct);
         await notificationService.NotifyAsync(order.CustomerUserId, NotificationEventType.OrderReady,
@@ -339,7 +357,7 @@ public class OrderService(
             await NotifyEligibleDriversAsync(order.CityId, newDelivery.Id, ct);
         }
 
-        return ToResponse(order);
+        return readyOutcome.Response;
     }
 
     /// <summary>Merchant confirms the customer collected a PICKUP order in person — the pickup
@@ -363,12 +381,14 @@ public class OrderService(
         }
 
         order.PaymentStatus = order.PaymentMethod == PaymentMethod.Pix ? PaymentStatus.Paid : order.PaymentStatus;
-        await TransitionAsync(order, OrderStatus.PickupCompleted, ct);
-
-        await notificationService.NotifyAsync(order.CustomerUserId, NotificationEventType.OrderDelivered,
-            "Pedido retirado!", "Seu pedido foi retirado com sucesso. Bom apetite!",
-            EventData(order.Id, NotificationEventType.OrderDelivered), ct);
-        return ToResponse(order);
+        var outcome = await TransitionAsync(order, OrderStatus.PickupCompleted, ct);
+        if (outcome.AppliedByThisCall)
+        {
+            await notificationService.NotifyAsync(order.CustomerUserId, NotificationEventType.OrderDelivered,
+                "Pedido retirado!", "Seu pedido foi retirado com sucesso. Bom apetite!",
+                EventData(order.Id, NotificationEventType.OrderDelivered), ct);
+        }
+        return outcome.Response;
     }
 
     public async Task<OrderResponse> CancelAsync(Guid establishmentId, Guid orderId, CancelOrderRequest request, CancellationToken ct)
@@ -405,6 +425,7 @@ public class OrderService(
         }
 
         order.Status = OrderStatus.Cancelled;
+        order.Version++;
         db.OrderStatusHistories.Add(new OrderStatusHistory
         {
             OrderId = order.Id, Status = OrderStatus.Cancelled, ChangedByUserId = currentUser.UserId, Notes = request.Reason
@@ -415,12 +436,17 @@ public class OrderService(
             EntityType = nameof(Order), EntityId = order.Id, MetadataJson = request.Reason is null ? null : $"{{\"reason\":\"{request.Reason}\"}}"
         });
 
-        await SaveChangesGuardingStockConcurrencyAsync(ct);
+        var outcome = await SaveTransitionAsync(order, OrderStatus.Cancelled, ct);
+        if (!outcome.AppliedByThisCall)
+        {
+            return outcome.Response;
+        }
+
         await realtime.OrderStatusChangedAsync(order.CustomerUserId, order.EstablishmentId, order.Id, order.Status.ToString(), ct);
         await notificationService.NotifyAsync(order.CustomerUserId, NotificationEventType.OrderCancelled,
             "Pedido cancelado", "Seu pedido foi cancelado pelo estabelecimento.",
             EventData(order.Id, NotificationEventType.OrderCancelled), ct);
-        return ToResponse(order);
+        return outcome.Response;
     }
 
     // ---------------------------------------------------------------
@@ -664,31 +690,69 @@ public class OrderService(
         }
     }
 
-    private async Task TransitionAsync(Order order, OrderStatus newStatus, CancellationToken ct, bool save = true)
+    /// <summary>Outcome of attempting to persist an order-status transition. <see cref="Response"/>
+    /// always reflects the correct CURRENT order state; <see cref="AppliedByThisCall"/> tells the
+    /// caller whether this specific request actually made the change (so it should still send its
+    /// realtime/notification side effects) or a concurrent identical request already won the race
+    /// (those side effects were already sent by the winner and must not be sent again).</summary>
+    private readonly record struct TransitionOutcome(OrderResponse Response, bool AppliedByThisCall);
+
+    private async Task<TransitionOutcome> TransitionAsync(Order order, OrderStatus newStatus, CancellationToken ct, bool save = true)
     {
         order.Status = newStatus;
+        order.Version++;
         db.OrderStatusHistories.Add(new OrderStatusHistory { OrderId = order.Id, Status = newStatus, ChangedByUserId = currentUser.UserId });
-        if (save)
+        if (!save)
         {
-            await SaveChangesGuardingStockConcurrencyAsync(ct);
+            return new TransitionOutcome(ToResponse(order), true);
+        }
+
+        var outcome = await SaveTransitionAsync(order, newStatus, ct);
+        if (outcome.AppliedByThisCall)
+        {
             await realtime.OrderStatusChangedAsync(order.CustomerUserId, order.EstablishmentId, order.Id, newStatus.ToString(), ct);
         }
+        return outcome;
     }
 
-    /// <summary>Two orders for the same Controlled-stock product can be accepted/cancelled
-    /// concurrently by different requests — Product.Version (optimistic concurrency token, same
-    /// pattern as Delivery.Version) turns what would otherwise be a silent lost-update (oversold
-    /// stock) into a clean, retryable 409 instead.</summary>
-    private async Task SaveChangesGuardingStockConcurrencyAsync(CancellationToken ct)
+    /// <summary>Central SaveChangesAsync wrapper for every order-status mutation. Two independent
+    /// optimistic-concurrency tokens can conflict here: <c>Product.Version</c> (a genuine stock
+    /// race — docs/SECURITY_AUDIT.md #4, unchanged behavior: 409 PRODUCT_STOCK_CONFLICT, caller
+    /// must retry from scratch) and <c>Order.Version</c> (two concurrent requests transitioning
+    /// the SAME order — e.g. two staff clicking "accept" at once). For an Order-only conflict,
+    /// this discards the failed attempt's pending changes, re-reads the real current state, and
+    /// applies the exact same idempotency rule every transition method already has at the top:
+    /// already in <paramref name="expectedStatus"/> is a successful no-op (the concurrent winner's
+    /// transition IS this request's desired outcome); anything else is a genuine
+    /// INVALID_ORDER_TRANSITION. This is what turns "N concurrent idempotent calls" into exactly
+    /// one applied transition instead of N duplicate history rows/realtime sends — see
+    /// docs/PERFORMANCE_TESTING.md's Scenario 6 finding.</summary>
+    private async Task<TransitionOutcome> SaveTransitionAsync(Order order, OrderStatus expectedStatus, CancellationToken ct)
     {
         try
         {
             await db.SaveChangesAsync(ct);
+            return new TransitionOutcome(ToResponse(order), true);
         }
-        catch (DbUpdateConcurrencyException)
+        catch (DbUpdateConcurrencyException ex)
         {
-            throw new ConflictException("PRODUCT_STOCK_CONFLICT",
-                "O estoque de um ou mais produtos foi alterado concorrentemente. Tente novamente.");
+            if (ex.Entries.Any(e => e.Entity is Domain.Catalog.Product))
+            {
+                throw new ConflictException("PRODUCT_STOCK_CONFLICT",
+                    "O estoque de um ou mais produtos foi alterado concorrentemente. Tente novamente.");
+            }
+
+            db.DiscardPendingChanges();
+            var current = await LoadFullOrderQuery().AsNoTracking().SingleOrDefaultAsync(o => o.Id == order.Id, ct)
+                ?? throw new NotFoundException("ORDER_NOT_FOUND", "Pedido não encontrado.");
+
+            if (current.Status == expectedStatus)
+            {
+                return new TransitionOutcome(ToResponse(current), false);
+            }
+
+            throw new ConflictException("INVALID_ORDER_TRANSITION",
+                $"Pedido não pode transicionar a partir do status {current.Status}.");
         }
     }
 

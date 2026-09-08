@@ -491,4 +491,76 @@ public class OrderServiceTests
         Assert.True(finalProduct.StockQuantity is >= 0 and <= 7); // never oversold below zero, and A's -3 always applied.
         Assert.Contains(verifyDb.InventoryMovements, m => m.Type == InventoryMovementType.Sale && m.OrderId == order1.Id);
     }
+
+    // ---------------------------------------------------------------
+    // Concurrent status transitions (docs/PERFORMANCE_TESTING.md Scenario 6 finding)
+    // ---------------------------------------------------------------
+
+    /// <summary>Regression test for the k6 Scenario 6 finding: two concurrent "accept" calls on the
+    /// SAME Pending order (e.g. a merchant double-clicking, or a retried request after a client
+    /// timeout) used to each independently pass the in-request idempotency check before either
+    /// committed, so both applied their own transition — duplicating the OrderStatusHistory row and
+    /// the customer notification even though the final Status ended up correct. Order.Version (an EF
+    /// Core concurrency token) now makes the second call's SaveChanges fail with
+    /// DbUpdateConcurrencyException; OrderService.SaveTransitionAsync catches that, re-reads the real
+    /// current state, and — since it's already in the expected (Accepted) status — returns the
+    /// existing result as a successful no-op (AppliedByThisCall=false) instead of throwing or
+    /// duplicating the customer-visible notification.
+    ///
+    /// Note on what this test can and can't prove under EF Core's InMemory provider: the *winning*
+    /// entity (Order itself) is verified never to be lost-updated by the loser — its Status/Version
+    /// end up exactly as the winner left them. The InMemory provider does NOT, however, roll back
+    /// *unrelated* Added entities (here, the loser's queued OrderStatusHistory row) atomically
+    /// alongside the conflicting Order update within the same failed SaveChanges call — real Postgres
+    /// transactions do (SaveChangesAsync wraps the whole batch in one transaction, so a rejected
+    /// concurrency check rolls back everything in that call, INSERTs included). This mirrors the same
+    /// documented limitation in Accept_TwoOrdersForSameProduct_Concurrently_... above. The
+    /// customer-visible guarantee that actually matters here — no duplicate notification/realtime
+    /// send — IS fully verified below via CapturingNotificationService, and the History-row
+    /// duplication-under-InMemory quirk is separately confirmed absent against real Postgres via the
+    /// k6 Scenario 6 re-run (docs/PERFORMANCE_TESTING.md).</summary>
+    [Fact]
+    public async Task Accept_SameOrderConcurrently_AppliesExactlyOnce_NeverDuplicatesNotification()
+    {
+        // Uncontrolled stock isolates this test to the Order.Version race — Product.Version's
+        // analogous protection is already covered by the test above.
+        var fx = await OrderTestFixture.CreateAsync(stockQuantity: null);
+        var customerSut = BuildCustomerSut(fx);
+        var order = await customerSut.CreateAsync(BuildCreateRequest(fx, quantity: 1, withOption: false), CancellationToken.None);
+
+        // Two independent DbContext instances over the SAME store, simulating two concurrent
+        // "accept" requests for the SAME order.
+        var dbA = fx.Db;
+        var dbB = InMemoryDbContextFactory.CreateAdditionalContext(fx.DatabaseName);
+
+        // Both "requests" read the order (still Pending) before either one writes.
+        _ = await dbB.Orders.SingleAsync(o => o.Id == order.Id);
+
+        var notificationsA = new CapturingNotificationService();
+        var notificationsB = new CapturingNotificationService();
+        var userA = new FakeCurrentUserService(fx.StaffUserId);
+        var sutA = new OrderService(dbA, userA, new EstablishmentAccessGuard(dbA, userA), new HaversineDistanceService(),
+            TestTokenService.Create(), TestDeliveryCodeCipher.Create(), new NoOpRealtimeNotifier(), notificationsA);
+        var userB = new FakeCurrentUserService(fx.StaffUserId);
+        var sutB = new OrderService(dbB, userB, new EstablishmentAccessGuard(dbB, userB), new HaversineDistanceService(),
+            TestTokenService.Create(), TestDeliveryCodeCipher.Create(), new NoOpRealtimeNotifier(), notificationsB);
+
+        var responseA = await sutA.AcceptAsync(fx.Establishment.Id, order.Id, CancellationToken.None);
+        Assert.Equal("Accepted", responseA.Status);
+        Assert.Single(notificationsA.Notifications); // the winner's own "OrderAccepted" notification.
+
+        // B's context still holds the stale (pre-A) tracked order. Its call must NOT throw and must
+        // NOT duplicate the transition — it must observe A's already-applied result instead, with no
+        // notification sent (it never applied anything).
+        var responseB = await sutB.AcceptAsync(fx.Establishment.Id, order.Id, CancellationToken.None);
+        Assert.Equal("Accepted", responseB.Status);
+        Assert.Empty(notificationsB.Notifications);
+
+        // The Order row itself was never lost-updated by the loser: it reflects exactly what the
+        // winner (A) wrote, not a second increment from B's rejected attempt.
+        var verifyDb = InMemoryDbContextFactory.CreateAdditionalContext(fx.DatabaseName);
+        var finalOrder = await verifyDb.Orders.SingleAsync(o => o.Id == order.Id);
+        Assert.Equal(OrderStatus.Accepted, finalOrder.Status);
+        Assert.Equal(1, finalOrder.Version);
+    }
 }

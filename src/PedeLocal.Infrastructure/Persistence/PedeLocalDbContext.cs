@@ -104,6 +104,8 @@ public class PedeLocalDbContext : DbContext, IAppDbContext
         return base.SaveChangesAsync(cancellationToken);
     }
 
+    public void DiscardPendingChanges() => ChangeTracker.Clear();
+
     private void TouchTimestamps()
     {
         foreach (var entry in ChangeTracker.Entries<Domain.Common.BaseEntity>())

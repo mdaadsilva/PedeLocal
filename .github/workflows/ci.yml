@@ -162,6 +162,100 @@ jobs:
             api-e2e.log
           if-no-files-found: ignore
 
+  perf-smoke:
+    runs-on: ubuntu-latest
+    # Informational, not a merge gate: scenario 06's known finding (Order lacked an
+    # optimistic-concurrency token, letting concurrent idempotent transitions duplicate
+    # status-history entries) was fixed — see docs/PERFORMANCE_TESTING.md#gargalos-encontrados
+    # (Order.Version). continue-on-error stays on regardless: the latency thresholds here are a
+    # non-aggressive baseline calibrated on a dev laptop, not a staging SLA, so blocking PRs on
+    # machine-to-machine latency variance would be the wrong signal — the pedelocal_*_total
+    # correctness counters (count==0) remain the bar that actually matters.
+    continue-on-error: true
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: pedelocal_perf
+          POSTGRES_USER: pedelocal
+          POSTGRES_PASSWORD: ci-only-password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U pedelocal"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      ASPNETCORE_ENVIRONMENT: Development
+      ConnectionStrings__Default: "Host=localhost;Port=5432;Database=pedelocal_perf;Username=pedelocal;Password=ci-only-password"
+      Jwt__Secret: "ci-perf-secret-key-must-be-at-least-32-chars"
+      Jwt__Issuer: PedeLocal
+      Jwt__Audience: PedeLocal.Client
+      # Smoke's own default (5 VUs, one login each) already fits the production rate-limit
+      # default — this is raised anyway so re-runs/retries within the same CI job never trip it
+      # by accident. Never the production default itself (Program.cs is untouched).
+      RateLimiting__AuthPermitLimit: "1000"
+      RateLimiting__GlobalPermitLimit: "10000"
+      PEDELOCAL_API_URL: http://127.0.0.1:8080
+      PEDELOCAL_ADMIN_EMAIL: admin@pedelocal.dev
+      PEDELOCAL_ADMIN_PASSWORD: Senha123!
+      PEDELOCAL_TEST_PASSWORD: Senha123!
+      PROFILE: smoke
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET ${{ env.DOTNET_VERSION }}
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Install k6
+        run: |
+          sudo gpg -k
+          sudo gpg --no-default-keyring --keyring /usr/share/keyrings/k6-archive-keyring.gpg \
+            --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys C5AD17C747E3415A3642D57D77C6C491D6AC1D69
+          echo "deb [signed-by=/usr/share/keyrings/k6-archive-keyring.gpg] https://dl.k6.io/deb stable main" \
+            | sudo tee /etc/apt/sources.list.d/k6.list
+          sudo apt-get update
+          sudo apt-get install -y k6
+
+      - name: Restore and build API
+        run: |
+          dotnet restore PedeLocal.slnx
+          dotnet build src/PedeLocal.Api/PedeLocal.Api.csproj --no-restore --configuration Release
+
+      - name: Start API
+        run: |
+          nohup dotnet run --project src/PedeLocal.Api/PedeLocal.Api.csproj --no-build --configuration Release --urls http://127.0.0.1:8080 > api-perf.log 2>&1 &
+          for i in $(seq 1 60); do
+            if curl -sf http://127.0.0.1:8080/api/cities >/dev/null; then
+              echo "API ready"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "API failed to start"
+          cat api-perf.log
+          exit 1
+
+      - name: Run k6 smoke suite
+        working-directory: tests/performance
+        run: bash ./run-smoke.sh
+
+      - name: Upload k6 results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: k6-smoke-results
+          path: |
+            tests/performance/results
+            api-perf.log
+          if-no-files-found: ignore
+
   docker-build:
     runs-on: ubuntu-latest
     needs: build-and-test
