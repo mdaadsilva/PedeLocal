@@ -164,12 +164,13 @@ jobs:
 
   perf-smoke:
     runs-on: ubuntu-latest
-    # Informational, not a merge gate: scenario 06 has a real, documented, known finding
-    # (docs/PERFORMANCE_TESTING.md#gargalos-encontrados — Order lacks an optimistic-concurrency
-    # token, so concurrent idempotent transitions can duplicate status-history entries) that is
-    # intentionally left for a dedicated follow-up PR rather than fixed here. A perf job that
-    # always fails "by default" only trains the team to ignore red — continue-on-error keeps the
-    # signal visible (via the uploaded k6 summaries) without blocking unrelated PRs.
+    # Informational, not a merge gate: scenario 06's known finding (Order lacked an
+    # optimistic-concurrency token, letting concurrent idempotent transitions duplicate
+    # status-history entries) was fixed — see docs/PERFORMANCE_TESTING.md#gargalos-encontrados
+    # (Order.Version). continue-on-error stays on regardless: the latency thresholds here are a
+    # non-aggressive baseline calibrated on a dev laptop, not a staging SLA, so blocking PRs on
+    # machine-to-machine latency variance would be the wrong signal — the pedelocal_*_total
+    # correctness counters (count==0) remain the bar that actually matters.
     continue-on-error: true
     services:
       postgres:

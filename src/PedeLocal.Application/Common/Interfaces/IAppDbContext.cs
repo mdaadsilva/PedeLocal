@@ -71,4 +71,11 @@ public interface IAppDbContext
     DbSet<AuditLog> AuditLogs { get; }
 
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>Discards every pending tracked change (Added/Modified/Deleted) without touching the
+    /// database — used to safely abandon a SaveChangesAsync attempt that failed with
+    /// DbUpdateConcurrencyException before re-reading the real current state and deciding whether
+    /// a concurrent request already applied the same change (idempotent no-op) or something
+    /// genuinely different happened (real conflict).</summary>
+    void DiscardPendingChanges();
 }

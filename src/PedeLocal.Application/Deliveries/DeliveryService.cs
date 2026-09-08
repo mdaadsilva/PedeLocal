@@ -125,11 +125,17 @@ public class DeliveryService(
         delivery.Status = DeliveryStatus.PickedUp;
         delivery.PickedUpAtUtc = DateTime.UtcNow;
         order.Status = OrderStatus.PickedUp;
+        order.Version++;
         db.OrderStatusHistories.Add(new OrderStatusHistory { OrderId = order.Id, Status = OrderStatus.PickedUp, ChangedByUserId = currentUser.UserId });
 
-        await db.SaveChangesAsync(ct);
-        await realtime.OrderStatusChangedAsync(order.CustomerUserId, order.EstablishmentId, order.Id, order.Status.ToString(), ct);
-        return ToResponse(delivery);
+        var (applied, currentDelivery, currentOrder) = await SaveDeliveryTransitionAsync(delivery, order, OrderStatus.PickedUp, ct);
+        if (!applied)
+        {
+            return ToResponse(currentDelivery);
+        }
+
+        await realtime.OrderStatusChangedAsync(currentOrder.CustomerUserId, currentOrder.EstablishmentId, currentOrder.Id, currentOrder.Status.ToString(), ct);
+        return ToResponse(currentDelivery);
     }
 
     public async Task<DeliveryResponse> OutForDeliveryAsync(Guid deliveryId, CancellationToken ct)
@@ -148,14 +154,20 @@ public class DeliveryService(
         delivery.Status = DeliveryStatus.OutForDelivery;
         delivery.OutForDeliveryAtUtc = DateTime.UtcNow;
         order.Status = OrderStatus.OutForDelivery;
+        order.Version++;
         db.OrderStatusHistories.Add(new OrderStatusHistory { OrderId = order.Id, Status = OrderStatus.OutForDelivery, ChangedByUserId = currentUser.UserId });
 
-        await db.SaveChangesAsync(ct);
-        await realtime.OrderStatusChangedAsync(order.CustomerUserId, order.EstablishmentId, order.Id, order.Status.ToString(), ct);
-        await notificationService.NotifyAsync(order.CustomerUserId, NotificationEventType.OrderOutForDelivery,
+        var (applied, currentDelivery, currentOrder) = await SaveDeliveryTransitionAsync(delivery, order, OrderStatus.OutForDelivery, ct);
+        if (!applied)
+        {
+            return ToResponse(currentDelivery);
+        }
+
+        await realtime.OrderStatusChangedAsync(currentOrder.CustomerUserId, currentOrder.EstablishmentId, currentOrder.Id, currentOrder.Status.ToString(), ct);
+        await notificationService.NotifyAsync(currentOrder.CustomerUserId, NotificationEventType.OrderOutForDelivery,
             "Pedido saiu para entrega!", "Seu pedido saiu para entrega e logo chega até você.",
-            EventData(order.Id, delivery.Id, NotificationEventType.OrderOutForDelivery), ct);
-        return ToResponse(delivery);
+            EventData(currentOrder.Id, delivery.Id, NotificationEventType.OrderOutForDelivery), ct);
+        return ToResponse(currentDelivery);
     }
 
     public async Task<DeliveryResponse> ConfirmAsync(Guid deliveryId, ConfirmDeliveryRequest request, CancellationToken ct)
@@ -198,6 +210,7 @@ public class DeliveryService(
         driver.Status = DriverStatus.Available;
 
         order.Status = OrderStatus.Delivered;
+        order.Version++;
         order.PaymentStatus = order.PaymentMethod == Domain.Orders.PaymentMethod.Pix ? PaymentStatus.Paid : order.PaymentStatus;
         db.OrderStatusHistories.Add(new OrderStatusHistory { OrderId = order.Id, Status = OrderStatus.Delivered, ChangedByUserId = currentUser.UserId });
 
@@ -214,13 +227,18 @@ public class DeliveryService(
             });
         }
 
-        await db.SaveChangesAsync(ct);
-        await realtime.OrderStatusChangedAsync(order.CustomerUserId, order.EstablishmentId, order.Id, order.Status.ToString(), ct);
-        await realtime.DeliveryCompletedAsync(order.CustomerUserId, order.EstablishmentId, order.Id, ct);
-        await notificationService.NotifyAsync(order.CustomerUserId, NotificationEventType.OrderDelivered,
+        var (applied, currentDelivery, currentOrder) = await SaveDeliveryTransitionAsync(delivery, order, OrderStatus.Delivered, ct);
+        if (!applied)
+        {
+            return ToResponse(currentDelivery);
+        }
+
+        await realtime.OrderStatusChangedAsync(currentOrder.CustomerUserId, currentOrder.EstablishmentId, currentOrder.Id, currentOrder.Status.ToString(), ct);
+        await realtime.DeliveryCompletedAsync(currentOrder.CustomerUserId, currentOrder.EstablishmentId, currentOrder.Id, ct);
+        await notificationService.NotifyAsync(currentOrder.CustomerUserId, NotificationEventType.OrderDelivered,
             "Pedido entregue!", "Seu pedido foi entregue. Bom apetite!",
-            EventData(order.Id, delivery.Id, NotificationEventType.OrderDelivered), ct);
-        return ToResponse(delivery);
+            EventData(currentOrder.Id, delivery.Id, NotificationEventType.OrderDelivered), ct);
+        return ToResponse(currentDelivery);
     }
 
     /// <summary>Everything the assigned driver needs to execute the delivery — order items, payment
@@ -302,6 +320,40 @@ public class DeliveryService(
         if (driver.Status == DriverStatus.Blocked)
         {
             throw new ForbiddenException("DRIVER_BLOCKED", "Seu acesso está bloqueado.");
+        }
+    }
+
+    /// <summary>Attempts to persist a delivery-driven order transition (Pickup/OutForDelivery/Confirm),
+    /// each of which mutates both Delivery and Order together. Order.Version guards the race where
+    /// the same driver double-taps (or retries after a client timeout): the loser's SaveChanges fails
+    /// with DbUpdateConcurrencyException. We discard the failed attempt's pending changes, re-read the
+    /// real current Delivery/Order state, and — mirroring OrderService.SaveTransitionAsync's
+    /// idempotency rule — treat "Order already in the expected status" as a successful no-op
+    /// (Applied=false: the concurrent winner already sent realtime/notification/receivable side
+    /// effects, so the caller must not repeat them) rather than surfacing an error.</summary>
+    private async Task<(bool Applied, Delivery Delivery, Order Order)> SaveDeliveryTransitionAsync(
+        Delivery delivery, Order order, OrderStatus expectedOrderStatus, CancellationToken ct)
+    {
+        try
+        {
+            await db.SaveChangesAsync(ct);
+            return (true, delivery, order);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            db.DiscardPendingChanges();
+            var currentOrder = await db.Orders.AsNoTracking().SingleOrDefaultAsync(o => o.Id == order.Id, ct)
+                ?? throw new NotFoundException("ORDER_NOT_FOUND", "Pedido da entrega não encontrado.");
+            var currentDelivery = await db.Deliveries.AsNoTracking().SingleOrDefaultAsync(d => d.Id == delivery.Id, ct)
+                ?? throw new NotFoundException("DELIVERY_NOT_FOUND", "Entrega não encontrada.");
+
+            if (currentOrder.Status == expectedOrderStatus)
+            {
+                return (false, currentDelivery, currentOrder);
+            }
+
+            throw new ConflictException("INVALID_DELIVERY_TRANSITION",
+                $"Pedido não pode transicionar a partir do status {currentOrder.Status}.");
         }
     }
 

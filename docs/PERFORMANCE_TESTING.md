@@ -178,11 +178,13 @@ do pedido deve conter exatamente uma entrada `Accepted`; (2) N chamadas
 simultâneas de `ready` pulando `preparing` — todas devem continuar
 rejeitadas com 409 `INVALID_ORDER_TRANSITION`.
 
-**Achado real** (ver "Gargalos encontrados" abaixo): a checagem (1) falha
-consistentemente — `Order` não tem token de concorrência otimista, então
-chamadas concorrentes de uma transição idempotente podem duplicar a entrada
-de histórico (e o envio de evento SignalR/notificação) mesmo com o valor
-final de `Order.Status` correto.
+**Achado real, corrigido** (ver "Gargalos encontrados" abaixo): a checagem
+(1) falhava consistentemente até a introdução de `Order.Version` (token de
+concorrência otimista) — chamadas concorrentes de uma transição idempotente
+duplicavam a entrada de histórico (e o envio de evento SignalR/notificação)
+mesmo com o valor final de `Order.Status` correto. Corrigido; ambas as
+checagens passam agora, inclusive sob carga (`PROFILE=load`,
+`STATUS_CONCURRENT_CALLS` elevado).
 
 ### 7 — SignalR (`07-signalr.js`)
 
@@ -308,12 +310,12 @@ tratem como um piso de sanidade, não como referência de capacidade.
 | 03 — Preview | 147 | `orders:preview` p95 ≈ 13ms | ✅ passou, 0 inconsistências |
 | 04 — Criação de pedidos | 154 | `orders:create` p95 ≈ 13ms | ✅ passou — 3 pedidos aceitos, 132 corretamente rejeitados por falta de estoque, estoque final consistente |
 | 05 — Driver race | 69 | `driver:accept` p95 ≈ 204ms | ✅ passou — 3/3 trials com exatamente 1 vencedor, 0 anomalias |
-| 06 — Transições de status | 42 | `orders:accept` p95 ≈ 41ms | ❌ achado real — ver abaixo |
+| 06 — Transições de status | 42 | `orders:accept` p95 ≈ 41ms | ✅ passou (após correção — ver abaixo) — 0 anomalias, inclusive com 10 chamadas concorrentes em `PROFILE=load` |
 | 07 — SignalR | 240 HTTP + 76 conexões WS | handshake p95 = 6ms, entrega de evento p95 ≈ 64ms | ✅ passou — 100% conexão, 100% entrega de evento |
 
 Throughput e taxa de erro: em todos os cenários, `http_req_failed` ficou em
-**0%** depois dos ajustes descritos abaixo (a única fonte de erro real
-encontrada foi o bug do cenário 6, não infraestrutura/timeout).
+**0%** depois dos ajustes descritos abaixo. O bug do cenário 6 (achado #2)
+foi corrigido e revalidado contra Postgres real — ver abaixo.
 
 ## Gargalos encontrados
 
@@ -331,52 +333,87 @@ threshold do cenário 1 foi ajustado para refletir esse patamar real
 baixo. Recomendação para staging: medir o custo de CPU do BCrypt sob carga
 real e dimensionar réplicas/CPU da API de acordo — não o algoritmo.
 
-### 2. `Order` sem token de concorrência otimista — histórico duplicado sob transição concorrente (real, correção não aplicada aqui)
+### 2. `Order` sem token de concorrência otimista — histórico duplicado sob transição concorrente (corrigido)
 
 **Achado**: o cenário 6 mostrou, de forma reproduzível (3/3 trials em duas
 execuções distintas), que **N chamadas concorrentes de uma transição
-idempotente permitida** (`accept` num pedido `Pending`) produzem **N
+idempotente permitida** (`accept` num pedido `Pending`) produziam **N
 entradas** de `OrderStatusHistory` com o mesmo status, não uma — mesmo o
 valor final de `Order.Status` ficando correto. O mesmo caminho também
-dispara `realtime.OrderStatusChangedAsync`/`notificationService.NotifyAsync`
+disparava `realtime.OrderStatusChangedAsync`/`notificationService.NotifyAsync`
 uma vez por chamada concorrente, não uma vez por transição real.
 
+**Endpoint afetado**: `POST /api/merchant/establishments/{id}/orders/{orderId}/accept`
+e, pelo mesmo padrão de código (mesma checagem de idempotência
+check-then-act sem proteção), todo endpoint que muta `Order.Status`:
+`preparing`, `ready`, `complete-pickup`, `cancel` (`OrderService`) e
+`pickup`, `out-for-delivery`, `confirm` (`DeliveryService`).
+
 **Causa raiz**: `OrderService.AcceptAsync` (e as demais transições em
-`TransitionAsync`/`CancelAsync`, e as chamadas equivalentes em
-`DeliveryService`) fazem a checagem de idempotência lendo `order.Status` no
-início do método, mas `Order` **não tem** um token de concorrência otimista
-(diferente de `Delivery.Version` e `Product.Version`, já existentes —
-`docs/DECISIONS.md` #07 e `docs/SECURITY_AUDIT.md` #4). Se duas (ou mais)
-requisições concorrentes leem `Pending` antes de qualquer uma commitar,
-todas passam pela guarda de idempotência e cada uma insere sua própria
-entrada de histórico.
+`TransitionAsync`/`MarkReadyAsync`/`CompletePickupAsync`/`CancelAsync`, e as
+chamadas equivalentes em `DeliveryService`) faziam a checagem de
+idempotência lendo `order.Status` no início do método, mas `Order` **não
+tinha** um token de concorrência otimista (diferente de `Delivery.Version` e
+`Product.Version`, já existentes — `docs/DECISIONS.md` #07 e
+`docs/SECURITY_AUDIT.md` #4). Se duas (ou mais) requisições concorrentes
+liam `Pending` antes de qualquer uma commitar, todas passavam pela guarda de
+idempotência e cada uma inseria sua própria entrada de histórico — um
+clássico *check-then-act* sem atomicidade real entre a leitura e a escrita.
 
-**Por que não corrigido nesta PR**: a correção correta e seguindo o mesmo
-padrão já estabelecido (`Order.Version` como concurrency token) exigiria
-alterações em **múltiplos pontos de mutação de `Order.Status` em dois
-services** (`OrderService.TransitionAsync`/`MarkReadyAsync`/`CancelAsync` e
-`DeliveryService.AcceptAsync`/`PickupAsync`/`OutForDeliveryAsync`/
-`ConfirmAsync`), cada um precisando de tratamento de
-`DbUpdateConcurrencyException` + uma nova migration — uma mudança
-estrutural, não uma correção pequena e isolada. Por instrução explícita
-desta etapa ("mudanças estruturais devem ser documentadas para outra PR"),
-o achado fica registrado aqui para uma PR dedicada, com o mesmo padrão já
-usado duas vezes neste código (`Delivery.Version`, `Product.Version`) como
-referência direta de implementação.
+**Impacto real (antes da correção)**: não corrompia o estado final do
+pedido (o status terminava correto) nem duplicava efeitos
+financeiros/estoque para produtos `Uncontrolled` (a maioria) — para produtos
+`Controlled`, o `Product.Version` já existente absorvia parte do problema
+(uma segunda dedução concorrente de estoque já virava 409
+`PRODUCT_STOCK_CONFLICT`). O impacto real era: histórico de auditoria
+poluído (múltiplas entradas idênticas) e tráfego redundante de
+SignalR/push por transição — qualidade de dado e ruído, não perda de
+integridade financeira. Ainda assim, era um bug real de idempotência que
+precisava ser corrigido antes de produção lidar com volume real de cliques
+duplicados/retries de rede.
 
-**Impacto real**: não corrompe o estado final do pedido (o status termina
-correto) nem duplica efeitos financeiros/estoque para produtos
-`Uncontrolled` (a maioria) — para produtos `Controlled`, o
-`Product.Version` já existente absorve parte do problema (uma segunda
-dedução concorrente de estoque already viraria 409 `PRODUCT_STOCK_CONFLICT`).
-O impacto real e confirmado é: histórico de auditoria poluído (múltiplas
-entradas idênticas) e tráfego redundante de SignalR/push por transição —
-qualidade de dado e ruído, não perda de integridade financeira. Ainda
-assim, é um bug real de idempotência que deveria ser corrigido antes de
-produção lidar com volume real de cliques duplicados/retries de rede.
+**Classificação**: bug real de aplicação (não do teste — o script k6 estava
+correto; ele apenas expôs uma race condition genuína no backend).
 
-**Cenário 6 falha propositalmente no smoke** até essa correção existir —
-ver seção de CI abaixo para como isso é tratado sem travar todo PR.
+**Correção aplicada**: `Order.Version` (novo `int`, `IsConcurrencyToken()`,
+migration `AddOrderVersionConcurrencyToken`) — o mesmo padrão já usado em
+`Delivery.Version`/`Product.Version`. Todo ponto de mutação de
+`Order.Status` (`OrderService.TransitionAsync` — usado por
+`AcceptAsync`/`MarkPreparingAsync`/`MarkReadyAsync`/`CompletePickupAsync` —,
+`CancelAsync`, e `DeliveryService.PickupAsync`/`OutForDeliveryAsync`/
+`ConfirmAsync`) agora incrementa `Version` e trata
+`DbUpdateConcurrencyException`: descarta a tentativa que perdeu a corrida
+(`IAppDbContext.DiscardPendingChanges()`), relê o estado real via
+`AsNoTracking()` e reaplica a MESMA regra de idempotência que cada método já
+tinha — se o pedido já está no status esperado, retorna sucesso sem repetir
+efeitos colaterais (SignalR/push/histórico); caso contrário, propaga o 409
+`INVALID_ORDER_TRANSITION` real. `DeliveryService.AcceptAsync` foi
+deliberadamente deixado sem alteração — já está totalmente protegido por
+`Delivery.Version` mais uma pré-checagem rápida (`DELIVERY_ALREADY_TAKEN`),
+e mexer nesse caminho crítico e já bem testado (first-accept-wins) não
+trazia benefício adicional.
+
+**Teste de regressão**: `OrderServiceTests.Accept_SameOrderConcurrently_AppliesExactlyOnce_NeverDuplicatesNotification`
+(`tests/PedeLocal.UnitTests/Orders/OrderServiceTests.cs`) — duas instâncias
+de `DbContext` sobre o mesmo store InMemory simulam duas requisições
+concorrentes de `accept` no mesmo pedido; confirma que o pedido nunca é
+lost-updated pelo perdedor (`Version` fica exatamente como o vencedor
+deixou) e que nenhuma notificação duplicada é enviada
+(`CapturingNotificationService`). A duplicação da linha de
+`OrderStatusHistory` especificamente não é 100% replicável de forma
+confiável no provider InMemory do EF Core — ele não reverte atomicamente
+entidades `Added` não relacionadas numa mesma chamada de `SaveChanges` que
+falha por conflito de concorrência em OUTRA entidade (mesma limitação já
+documentada no teste `Accept_TwoOrdersForSameProduct_Concurrently_...`
+acima); Postgres real usa uma transação real por `SaveChangesAsync`, então
+esse cenário específico foi confirmado ausente contra o container Postgres
+real (ver abaixo), não só no InMemory.
+
+**Revalidado com o cenário 6 do k6 contra Postgres real** (Docker, migration
+aplicada): 0 anomalias em `PROFILE=smoke` (padrão) e também em `PROFILE=load`
+com `STATUS_CONCURRENT_CALLS=10` (2,5× o default) — a checagem "concurrent
+accept: exactly one Accepted history entry" passa de forma consistente, e a
+suíte completa (`run-smoke.sh`, todos os 7 cenários) continua 100% verde.
 
 ## Banco: observações desta etapa
 
@@ -398,10 +435,13 @@ recomendaria uma nova migration, para a PR dedicada).
 
 `run-smoke.sh` está pronto para um job de CI **não-bloqueante** (`continue-on-error`
 no step do k6, artefato de resultado sempre enviado) — ver
-`.github/workflows/ci.yml`, job `perf-smoke`. Não-bloqueante propositalmente:
-o cenário 6 tem uma falha real e conhecida (achado #2 acima) que não deve
-travar todo PR até ser corrigido numa PR dedicada; um job que sempre falha
-"por padrão" só treina o time a ignorar o sinal vermelho.
+`.github/workflows/ci.yml`, job `perf-smoke`. A falha conhecida do cenário 6
+(achado #2 acima) foi corrigida e revalidada (ver acima); `continue-on-error`
+foi mantido mesmo assim, já que thresholds de latência (não os contadores de
+correção) ainda são um piso não-agressivo calibrado num notebook, não um SLA
+de staging — travar o PR por variação de latência de máquina não seria o
+sinal certo. Os contadores de correção (`pedelocal_*_total: count==0`)
+continuam sendo o sinal que importa de verdade e devem ficar em zero.
 
 `load`/`stress` **não** rodam automaticamente em nenhum job — são
 executados manualmente (`PROFILE=load k6 run ...`) ou por um workflow
