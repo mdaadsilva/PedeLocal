@@ -2,14 +2,18 @@
 
 ## Pré-requisitos do entregador
 
+Ver `docs/DRIVER_ONBOARDING.md` para o fluxo completo (estados, CNH,
+veículo, elegibilidade). Resumo do que importa para aceitar/executar uma
+entrega:
+
 ```text
-PENDING_APPROVAL → não pode trabalhar (aprovação do Super Admin)
-APPROVED + status ONLINE → AVAILABLE
+eligibilityStatus != Eligible → não pode ficar online nem aceitar entrega
+eligibilityStatus == Eligible → GoOnline disponível (Offline → Available)
 ```
 
 ```text
-GET  /api/driver/me                  -- perfil + approvalStatus + status
-POST /api/driver/me/status/online    -- Offline → Available (falha se PendingApproval/Blocked/Busy)
+GET  /api/driver/me                  -- perfil + onboardingStatus + eligibilityStatus + status
+POST /api/driver/me/status/online    -- Offline → Available (403 se não Eligible, 409 se Busy)
 POST /api/driver/me/status/offline   -- Available → Offline (falha se Busy)
 ```
 
@@ -116,6 +120,38 @@ criptografada de forma reversível (`IDeliveryCodeCipher`, AES-GCM,
 chave derivada do `Jwt:Secret` já existente), guardada só para este
 endpoint. A API nunca retorna o hash em nenhuma resposta. Ver
 `docs/DECISIONS.md` #17 para a decisão completa.
+
+## Ocorrências na entrega
+
+Registro simples de problema operacional relatado pelo entregador durante
+uma entrega em andamento — imutável (sem edição/exclusão, é histórico do
+que foi relatado no momento).
+
+```text
+POST /api/driver/deliveries/{id}/occurrences   { "type": "CustomerNotFound", "note": "..." }
+GET  /api/driver/deliveries/{id}/occurrences
+GET  /api/merchant/establishments/{id}/orders/{orderId}/occurrences
+GET  /api/admin/deliveries/{id}/occurrences
+```
+
+Tipos: `CustomerNotFound`, `CustomerNotResponding`, `WrongAddress`,
+`PaymentProblem`, `VehicleProblem`, `Other`. `note` é opcional (até 500
+caracteres).
+
+Criar uma ocorrência exige ser o entregador responsável pela entrega
+(`403 DELIVERY_ACCESS_DENIED` caso contrário — mesma checagem de
+`pickup`/`confirm`/etc.). Visualizar exige ser esse mesmo entregador, staff
+do estabelecimento da entrega, ou SUPER_ADMIN
+(`403 OCCURRENCE_ACCESS_DENIED` para qualquer outro).
+
+## Troco (pagamento em dinheiro)
+
+`Order.changeForAmount` já é validado na criação do pedido
+(`docs/ORDER_FLOW.md`) — o entregador só precisa **consultar** quanto
+troco levar, via `GET /api/driver/deliveries/{id}/details` (campo
+`order.changeForAmount`, `null` quando não se aplica). Não existe endpoint
+separado — é parte do mesmo payload de detalhes que já mostra forma de
+pagamento e valores.
 
 ## Financeiro do entregador
 

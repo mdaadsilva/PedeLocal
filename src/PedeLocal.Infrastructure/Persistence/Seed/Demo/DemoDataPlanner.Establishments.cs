@@ -85,6 +85,10 @@ public static partial class DemoDataPlanner
                     OperationalStatus = operationalStatus,
                     CommercialStatus = CommercialStatus.Active // overwritten below once the subscription tier is known.
                 };
+                if (operationalStatus == OperationalStatus.Paused)
+                {
+                    ApplyPause(ctx, establishment);
+                }
                 ctx.Establishments.Add(establishment);
 
                 ctx.EstablishmentSettingsList.Add(new EstablishmentSettings
@@ -219,28 +223,38 @@ public static partial class DemoDataPlanner
         var number = (100 + uniqueSeed % 2000).ToString();
         var district = PickOne(ctx.Rng, DemoFixtureData.Districts);
         // Jitter within roughly ±0.025 degrees (~2.5km) of the city center — stays comfortably
-        // inside every establishment's DeliveryPricingSettings.MaxDistanceKm (15-20km below).
+        // inside every establishment's DeliveryPricingSettings.DeliveryRadiusKm (5-20km below).
         var latJitter = (decimal)(ctx.Rng.NextDouble() - 0.5) * 0.05m;
         var lngJitter = (decimal)(ctx.Rng.NextDouble() - 0.5) * 0.05m;
         return (street, number, district, cityFx.BaseLatitude + latJitter, cityFx.BaseLongitude + lngJitter);
     }
 
-    private static DeliveryPricingSettings PlanDeliveryPricing(Ctx ctx, Guid establishmentId)
+    /// <summary>Every establishment gets its own flat fee and radius — varied per the demo spec so
+    /// admin/merchant screens show a realistic spread rather than one identical value everywhere.</summary>
+    private static DeliveryPricingSettings PlanDeliveryPricing(Ctx ctx, Guid establishmentId) => new()
     {
-        var mode = WeightedPick(ctx.Rng, (DeliveryFeeMode.PerKm, 75), (DeliveryFeeMode.Fixed, 25));
-        return new DeliveryPricingSettings
-        {
-            EstablishmentId = establishmentId,
-            UrbanMode = mode,
-            UrbanFixedFee = mode == DeliveryFeeMode.Fixed ? RandomDecimal(ctx.Rng, 5, 12) : 0,
-            UrbanPricePerKm = mode == DeliveryFeeMode.PerKm ? RandomDecimal(ctx.Rng, 1.5m, 3.5m) : 0,
-            UrbanMinFee = RandomDecimal(ctx.Rng, 4, 7),
-            RuralMode = DeliveryFeeMode.PerKm,
-            RuralFixedFee = 0,
-            RuralPricePerKm = RandomDecimal(ctx.Rng, 2.5m, 4.5m),
-            RuralMinFee = RandomDecimal(ctx.Rng, 10, 18),
-            MaxDistanceKm = RandomDecimal(ctx.Rng, 15, 20, 0)
-        };
+        EstablishmentId = establishmentId,
+        DeliveryFee = RandomDecimal(ctx.Rng, 5, 15),
+        DeliveryRadiusKm = RandomDecimal(ctx.Rng, 5, 20, 0)
+    };
+
+    /// <summary>Varies pause reason and expiry across the small number of Paused establishments —
+    /// one indefinite pause, one with a future expiry (still blocking orders), one already past its
+    /// expiry (exercises EstablishmentPauseExpiryJob's auto-resume / the lazy IsOperationallyOpen
+    /// check at order-creation time).</summary>
+    private static void ApplyPause(Ctx ctx, Establishment establishment)
+    {
+        establishment.PauseReason = PickOne(ctx.Rng,
+        [
+            EstablishmentPauseReason.HighDemand, EstablishmentPauseReason.NoDriverAvailable,
+            EstablishmentPauseReason.TemporaryClosure, EstablishmentPauseReason.Other
+        ]);
+        establishment.PausedAtUtc = ctx.NowUtc.AddMinutes(-ctx.Rng.Next(10, 240));
+        establishment.PausedByUserId = DemoPlaceholders.SuperAdmin(ctx.Profile);
+        establishment.PausedUntilUtc = WeightedPick(ctx.Rng,
+            ((DateTime?)ctx.NowUtc.AddMinutes(ctx.Rng.Next(15, 180)), 40), // still paused
+            ((DateTime?)ctx.NowUtc.AddMinutes(-ctx.Rng.Next(5, 60)), 30),  // expired, auto-resume candidate
+            ((DateTime?)null, 30));                                       // indefinite, manual resume only
     }
 
     private static readonly HashSet<string> StockHeavyCategories = ["Açougue", "Farmácia", "Adega", "Hortifruti"];

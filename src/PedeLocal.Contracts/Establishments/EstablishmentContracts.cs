@@ -48,6 +48,9 @@ public record EstablishmentResponse(
     Guid AddressId,
     string OperationalStatus,
     string CommercialStatus,
-    DateTime CreatedAtUtc);
+    DateTime CreatedAtUtc,
+    string? PauseReason,
+    DateTime? PausedAtUtc,
+    DateTime? PausedUntilUtc);
 
 public record EstablishmentCategoryResponse(Guid Id, string Name);

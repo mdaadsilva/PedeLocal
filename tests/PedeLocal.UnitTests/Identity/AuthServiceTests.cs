@@ -76,7 +76,7 @@ public class AuthServiceTests
                 city.Id, "Motorcycle", "Cpf", "12345678901"),
             CancellationToken.None);
 
-        Assert.Equal("PendingApproval", response.ApprovalStatus);
+        Assert.Equal("PendingDocuments", response.OnboardingStatus);
     }
 
     [Fact]

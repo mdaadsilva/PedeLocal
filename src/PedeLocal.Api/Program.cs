@@ -14,6 +14,7 @@ using Scalar.AspNetCore;
 using PedeLocal.Api.Services;
 using PedeLocal.Application;
 using PedeLocal.Application.Common.Interfaces;
+using PedeLocal.Application.Establishments;
 using PedeLocal.Application.Subscriptions;
 using PedeLocal.Infrastructure;
 using PedeLocal.Infrastructure.Identity;
@@ -263,6 +264,11 @@ try
             "subscription-grace-period",
             job => job.RunAsync(CancellationToken.None),
             Cron.Daily(hour: 3), // 03:00 UTC — off-peak for the América/São Paulo audience.
+            new RecurringJobOptions { TimeZone = TimeZoneInfo.Utc });
+        recurringJobManager.AddOrUpdate<EstablishmentPauseExpiryJob>(
+            "establishment-pause-expiry",
+            job => job.RunAsync(CancellationToken.None),
+            Cron.MinuteInterval(15), // a pause is hours-long, not days-long — needs a much tighter cadence than the daily grace-period job.
             new RecurringJobOptions { TimeZone = TimeZoneInfo.Utc });
     }
 

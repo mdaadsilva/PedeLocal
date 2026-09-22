@@ -3,6 +3,14 @@ using PedeLocal.Contracts.Establishments;
 
 namespace PedeLocal.Application.Establishments;
 
+public class PauseEstablishmentRequestValidator : AbstractValidator<PauseEstablishmentRequest>
+{
+    public PauseEstablishmentRequestValidator()
+    {
+        RuleFor(x => x.Reason).NotEmpty();
+    }
+}
+
 public class CreateEstablishmentRequestValidator : AbstractValidator<CreateEstablishmentRequest>
 {
     public CreateEstablishmentRequestValidator()

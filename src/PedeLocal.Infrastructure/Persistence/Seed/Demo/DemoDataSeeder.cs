@@ -96,6 +96,8 @@ public static class DemoDataSeeder
 
         // Stage 5 — drivers.
         counts["Drivers"] = await AddMissingAsync(db.Drivers, plan.Drivers, d => d.Id, ct);
+        await AddMissingAsync(db.DriverLicenses, plan.DriverLicenses, l => l.DriverId, ct);
+        await AddMissingAsync(db.DriverVehicles, plan.DriverVehicles, v => v.DriverId, ct);
         await db.SaveChangesAsync(ct);
 
         // Stage 6 — orders, chunked so a LARGE profile never does one giant SaveChanges.
@@ -129,6 +131,8 @@ public static class DemoDataSeeder
         await DeleteMatchingAsync(db, db.OrderItems, i => i.Id, plan.OrderItems.Select(i => i.Id).ToList(), ct);
         await DeleteMatchingAsync(db, db.Orders, o => o.Id, plan.Orders.Select(o => o.Id).ToList(), ct);
 
+        await DeleteMatchingAsync(db, db.DriverLicenses, l => l.DriverId, plan.DriverLicenses.Select(l => l.DriverId).ToList(), ct);
+        await DeleteMatchingAsync(db, db.DriverVehicles, v => v.DriverId, plan.DriverVehicles.Select(v => v.DriverId).ToList(), ct);
         await DeleteMatchingAsync(db, db.Drivers, d => d.Id, plan.Drivers.Select(d => d.Id).ToList(), ct);
 
         await DeleteMatchingAsync(db, db.ProductOptions, o => o.Id, plan.ProductOptions.Select(o => o.Id).ToList(), ct);

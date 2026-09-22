@@ -39,6 +39,7 @@ public static class DependencyInjection
         services.AddScoped<FinanceService>();
         services.AddScoped<SubscriptionService>();
         services.AddScoped<SubscriptionGracePeriodJob>();
+        services.AddScoped<PedeLocal.Application.Establishments.EstablishmentPauseExpiryJob>();
         services.AddScoped<AdminService>();
         services.AddScoped<MeService>();
         services.AddScoped<DeviceTokenService>();

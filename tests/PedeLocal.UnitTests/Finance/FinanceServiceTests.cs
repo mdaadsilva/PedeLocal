@@ -31,7 +31,7 @@ public class FinanceServiceTests
         var driver = new Domain.Drivers.Driver
         {
             UserId = driverUserId, CityId = establishment.CityId, Cpf = "12345678901", VehicleType = VehicleType.Motorcycle,
-            PixKeyType = PixKeyType.Cpf, PixKey = "x", ApprovalStatus = DriverApprovalStatus.Approved, Status = DriverStatus.Available
+            PixKeyType = PixKeyType.Cpf, PixKey = "x", OnboardingStatus = DriverOnboardingStatus.Approved, Status = DriverStatus.Available
         };
         db.Drivers.Add(driver);
 
@@ -102,7 +102,7 @@ public class FinanceServiceTests
         db.Drivers.Add(new Domain.Drivers.Driver
         {
             UserId = otherDriverUserId, CityId = Guid.NewGuid(), Cpf = "98765432100", VehicleType = VehicleType.Bike,
-            PixKeyType = PixKeyType.Cpf, PixKey = "y", ApprovalStatus = DriverApprovalStatus.Approved, Status = DriverStatus.Available
+            PixKeyType = PixKeyType.Cpf, PixKey = "y", OnboardingStatus = DriverOnboardingStatus.Approved, Status = DriverStatus.Available
         });
         await db.SaveChangesAsync();
 

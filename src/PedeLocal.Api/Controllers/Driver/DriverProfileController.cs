@@ -15,6 +15,20 @@ public class DriverProfileController(DriverService driverService) : ControllerBa
     [ProducesResponseType(typeof(DriverResponse), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetMyProfile(CancellationToken ct) => Ok(await driverService.GetMyProfileAsync(ct));
 
+    [HttpGet("documents")]
+    [ProducesResponseType(typeof(DriverDetailResponse), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetMyDocuments(CancellationToken ct) => Ok(await driverService.GetMyDocumentsAsync(ct));
+
+    [HttpPut("documents/license")]
+    [ProducesResponseType(typeof(DriverDetailResponse), StatusCodes.Status200OK)]
+    public async Task<IActionResult> SubmitLicense(SubmitDriverLicenseRequest request, CancellationToken ct) =>
+        Ok(await driverService.SubmitLicenseAsync(request, ct));
+
+    [HttpPut("documents/vehicle")]
+    [ProducesResponseType(typeof(DriverDetailResponse), StatusCodes.Status200OK)]
+    public async Task<IActionResult> SubmitVehicle(SubmitDriverVehicleRequest request, CancellationToken ct) =>
+        Ok(await driverService.SubmitVehicleAsync(request, ct));
+
     [HttpPost("status/online")]
     [ProducesResponseType(typeof(DriverResponse), StatusCodes.Status200OK)]
     public async Task<IActionResult> GoOnline(CancellationToken ct) => Ok(await driverService.GoOnlineAsync(ct));

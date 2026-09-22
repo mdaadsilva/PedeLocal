@@ -116,35 +116,92 @@ public static partial class DemoDataPlanner
             _ => $"demo-pix-{uniqueSeed:D6}"
         };
 
-        // The predictable driver.<cidade>@pedelocal.dev account is always approved and immediately
-        // usable — it's meant for logging in and testing the driver app right away.
+        // The predictable driver.<cidade>@pedelocal.dev account is always approved, with valid
+        // documents, and immediately usable — it's meant for logging in and testing the driver app
+        // right away. Filler drivers get a realistic spread across every onboarding stage so the
+        // admin driver-review screen and the DocumentExpired/blocked paths all have real demo data
+        // to show, per docs/DRIVER_ONBOARDING.md.
         var isPredictable = credentialRole is not null;
-        var approvalStatus = isPredictable || ctx.Rng.Next(100) < 90
-            ? DriverApprovalStatus.Approved
-            : DriverApprovalStatus.PendingApproval;
+        var scenario = isPredictable
+            ? DriverScenario.ApprovedValid
+            : WeightedPick(ctx.Rng,
+                (DriverScenario.ApprovedValid, 55),
+                (DriverScenario.ApprovedExpiredLicense, 10),
+                (DriverScenario.UnderReview, 15),
+                (DriverScenario.PendingDocuments, 10),
+                (DriverScenario.Rejected, 5),
+                (DriverScenario.ApprovedBlocked, 5));
+
+        var onboardingStatus = scenario switch
+        {
+            DriverScenario.UnderReview => DriverOnboardingStatus.UnderReview,
+            DriverScenario.PendingDocuments => DriverOnboardingStatus.PendingDocuments,
+            DriverScenario.Rejected => DriverOnboardingStatus.Rejected,
+            _ => DriverOnboardingStatus.Approved
+        };
+        var hasDocuments = scenario is not DriverScenario.PendingDocuments;
+        var isReviewed = scenario is DriverScenario.Rejected or DriverScenario.ApprovedValid
+            or DriverScenario.ApprovedExpiredLicense or DriverScenario.ApprovedBlocked;
 
         // Driver.UserId has a real unique DB index — since the predictable driver's User.Id is now
         // shared across profiles (above), its Driver row's id must be shared too, or seeding a
         // second profile without resetting first would try to insert a second Driver row for the
         // same (already unique-constrained) UserId.
+        var driverId = isPredictable ? DemoIdFactory.ForShared("driver", email) : DemoIdFactory.For(ctx.Profile, "driver", email);
         var driver = new Driver
         {
-            Id = isPredictable ? DemoIdFactory.ForShared("driver", email) : DemoIdFactory.For(ctx.Profile, "driver", email),
+            Id = driverId,
             UserId = user.Id,
             CityId = DemoPlaceholders.City(ctx.Profile, cityIndex),
             Cpf = cpf,
             VehicleType = vehicleType,
             PixKeyType = pixKeyType,
             PixKey = pixKey,
-            ApprovalStatus = approvalStatus,
-            // Baseline Offline/Available split; PlanOrders may flip a couple of these to Busy when
-            // it deliberately leaves them with a live in-progress delivery ("entrega atual").
-            Status = approvalStatus == DriverApprovalStatus.Approved
-                ? WeightedPick(ctx.Rng, (DriverStatus.Available, 50), (DriverStatus.Offline, 50))
-                : DriverStatus.Offline,
-            ApprovedAtUtc = approvalStatus == DriverApprovalStatus.Approved ? ctx.NowUtc.AddDays(-ctx.Rng.Next(5, 120)) : null
+            OnboardingStatus = onboardingStatus,
+            // Baseline Offline/Available split for approved-and-usable drivers; PlanOrders may flip
+            // a couple of these to Busy when it deliberately leaves them with a live in-progress
+            // delivery ("entrega atual"). ApprovedBlocked always starts Blocked.
+            Status = scenario == DriverScenario.ApprovedBlocked
+                ? DriverStatus.Blocked
+                : onboardingStatus == DriverOnboardingStatus.Approved
+                    ? WeightedPick(ctx.Rng, (DriverStatus.Available, 50), (DriverStatus.Offline, 50))
+                    : DriverStatus.Offline,
+            ReviewedAtUtc = isReviewed ? ctx.NowUtc.AddDays(-ctx.Rng.Next(5, 120)) : null,
+            RejectionReason = scenario == DriverScenario.Rejected
+                ? PickOne(ctx.Rng, DriverRejectionReasons)
+                : null
         };
         ctx.Drivers.Add(driver);
+
+        if (hasDocuments)
+        {
+            var expiresAt = scenario == DriverScenario.ApprovedExpiredLicense
+                ? ctx.Today.AddDays(-ctx.Rng.Next(1, 90))   // already expired — DocumentExpired demo case.
+                : ctx.Today.AddDays(ctx.Rng.Next(60, 900));  // comfortably valid.
+            var category = vehicleType switch
+            {
+                VehicleType.Motorcycle => PickOne(ctx.Rng, new[] { "A", "AB" }),
+                VehicleType.Car => "B",
+                _ => PickOne(ctx.Rng, new[] { "A", "AB", "B" })
+            };
+            ctx.DriverLicenses.Add(new DriverLicense
+            {
+                DriverId = driverId,
+                RegistrationNumber = $"{90000000000L + uniqueSeed:D11}",
+                Category = category,
+                ExpiresAt = expiresAt,
+                HasEar = vehicleType == VehicleType.Motorcycle
+            });
+
+            ctx.DriverVehicles.Add(new DriverVehicle
+            {
+                DriverId = driverId,
+                Type = vehicleType,
+                Plate = vehicleType == VehicleType.Bike ? null : $"DEM{uniqueSeed % 10000:D4}",
+                Model = PickOne(ctx.Rng, VehicleModelsByType[vehicleType]),
+                Color = PickOne(ctx.Rng, DemoFixtureData.VehicleColors)
+            });
+        }
 
         if (credentialRole is not null)
         {
@@ -153,4 +210,20 @@ public static partial class DemoDataPlanner
 
         return new DriverInfo { Driver = driver, Busy = false };
     }
+
+    private enum DriverScenario { ApprovedValid, ApprovedExpiredLicense, ApprovedBlocked, UnderReview, PendingDocuments, Rejected }
+
+    private static readonly string[] DriverRejectionReasons =
+    [
+        "CNH ilegível — reenvie uma foto nítida.",
+        "Categoria da CNH incompatível com o veículo informado.",
+        "Documento do veículo não corresponde aos dados enviados."
+    ];
+
+    private static readonly Dictionary<VehicleType, string[]> VehicleModelsByType = new()
+    {
+        [VehicleType.Bike] = ["Caloi 10", "Monark Aro 26", "Oggi Sunrise"],
+        [VehicleType.Motorcycle] = ["Honda CG 160", "Honda Biz 125", "Yamaha Factor 150"],
+        [VehicleType.Car] = ["Fiat Mobi", "Chevrolet Onix", "Volkswagen Gol"]
+    };
 }

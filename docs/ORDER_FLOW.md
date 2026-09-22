@@ -34,8 +34,9 @@ decide o fluxo inteiro:
 | | `Delivery` | `Pickup` |
 |---|---|---|
 | `addressId` | obrigatório | ignorado — envie `null` |
-| Taxa de entrega | calculada normalmente | sempre `0` |
-| `calculatedDistanceKm` | calculado | `null` |
+| Taxa de entrega | valor fixo configurado pelo estabelecimento | sempre `0` |
+| Raio máximo | valida contra `deliveryRadiusKm` | não se aplica — sem checagem de distância |
+| `calculatedDistanceKm` | calculado (só para validar o raio, não o preço) | `null` |
 | `DELIVERY_PRICING_NOT_CONFIGURED` | pode bloquear o pedido | nunca se aplica |
 | Ao ficar `READY` | cria `Delivery` + código de 6 dígitos | não cria nada — fica `READY` mesmo |
 | Conclusão | entregador confirma código (`docs/DELIVERY_FLOW.md`) | comércio chama `complete-pickup` |
@@ -62,10 +63,10 @@ mesmo código, não uma reimplementação — e responde sem persistir nada:
   "type": "Delivery",
   "addressId": "...",
   "subtotal": 48.00,
-  "deliveryFee": 5.00,
-  "total": 53.00,
+  "deliveryFee": 7.00,
+  "total": 55.00,
   "distanceKm": 1.13,
-  "pricingRuleSnapshotJson": "{\"addressType\":\"Urban\",\"mode\":\"PerKm\",...}",
+  "pricingRuleSnapshotJson": "{\"deliveryFee\":7.00,\"distanceKm\":1.13,\"deliveryRadiusKm\":8.00}",
   "items": [ ... ]
 }
 ```
@@ -104,7 +105,11 @@ Validações do backend, nesta ordem — qualquer falha aborta o pedido inteiro
 (nada é criado):
 
 1. Estabelecimento existe, aceita pedidos (`EstablishmentSettings.acceptsNewOrders`),
-   não está suspenso comercialmente e está `OPEN` operacionalmente.
+   não está suspenso comercialmente e está operacionalmente aberto — isso
+   inclui **não estar pausado** (`OperationalStatus.Paused`, ver "Pausa do
+   estabelecimento" abaixo); tudo isso via `409 ESTABLISHMENT_CLOSED` (ou
+   `ESTABLISHMENT_NOT_ACCEPTING_ORDERS`/`ESTABLISHMENT_SUSPENDED`
+   conforme o caso), para `Delivery` e `Pickup` igualmente.
 2. **Somente se `orderType = Delivery`**: endereço de entrega pertence ao
    cliente autenticado e é da **mesma cidade** do estabelecimento
    (`400 ADDRESS_REQUIRED` se `addressId` vier vazio).
@@ -112,19 +117,47 @@ Validações do backend, nesta ordem — qualquer falha aborta o pedido inteiro
    (`isAvailable`), e — se `stockMode = Controlled` — há estoque suficiente
    somando todas as linhas do mesmo produto no pedido.
 4. Cada grupo de adicionais respeita `min`/`max` de seleção.
-5. **Somente se `orderType = Delivery`**: taxa de entrega calculada por
-   distância (haversine) e configuração do estabelecimento; se a distância
-   exceder `maxDistanceKm`, `400 DELIVERY_NOT_AVAILABLE`. Pedidos `Pickup`
-   pulam esta etapa inteira — `deliveryFee = 0` sempre, e o estabelecimento
-   não precisa ter `DeliveryPricingSettings` configurado.
+5. **Somente se `orderType = Delivery`**: distância até o endereço
+   (haversine) validada contra `deliveryRadiusKm` do estabelecimento — só
+   para decidir se a entrega é oferecida, **nunca** para calcular o preço
+   (`400 OUTSIDE_DELIVERY_AREA` se exceder). Dentro do raio, `deliveryFee`
+   é sempre o valor fixo configurado (`DeliveryPricingSettings.deliveryFee`),
+   independente da distância exata. Pedidos `Pickup` pulam esta etapa
+   inteira — `deliveryFee = 0` sempre, sem checagem de raio, e o
+   estabelecimento não precisa ter `DeliveryPricingSettings` configurado.
+6. `paymentMethod = Cash` com `changeForAmount` informado: valor deve ser
+   ≥ `subtotal + deliveryFee` (`400 INVALID_CHANGE_AMOUNT` caso contrário).
+   Qualquer outra forma de pagamento com `changeForAmount` preenchido:
+   `400 CHANGE_AMOUNT_NOT_APPLICABLE` — troco só existe para dinheiro.
 
 **Idempotência**: reenviar a mesma requisição com o mesmo `idempotencyKey`
 (por esse cliente) retorna o pedido já criado em vez de duplicar — seguro
 para retry automático em caso de timeout de rede.
 
-**Snapshot**: `unitPrice`, `productName` e os nomes/preços dos adicionais
-selecionados são congelados no pedido no momento da criação. Mudanças
-futuras no cardápio não alteram pedidos já feitos.
+**Snapshot**: `unitPrice`, `productName`, os nomes/preços dos adicionais
+selecionados, e a própria `deliveryFee`/`pricingRuleSnapshotJson` são
+congelados no pedido no momento da criação. Mudanças futuras no cardápio ou
+na taxa de entrega do estabelecimento não alteram pedidos já feitos — se a
+loja mudar a taxa de R$7 para R$10 amanhã, pedidos de hoje continuam com R$7.
+
+## Pausa do estabelecimento
+
+O comércio pode pausar temporariamente o recebimento de **novos** pedidos
+(`Delivery` e `Pickup` igualmente) — pedidos já em andamento seguem
+normalmente até o fim.
+
+```text
+POST /api/merchant/establishments/{id}/pause    { "reason": "HighDemand", "pausedUntilUtc": null }
+POST /api/merchant/establishments/{id}/resume
+```
+
+`reason`: `HighDemand`, `NoDriverAvailable`, `TemporaryClosure`, `Other`.
+`pausedUntilUtc` é opcional — omitido, a pausa só termina com um `resume`
+manual; informado, um job (`EstablishmentPauseExpiryJob`, a cada 15 min)
+retoma automaticamente, e mesmo antes do job rodar uma pausa já vencida
+nunca bloqueia um pedido novo. Requer ser staff do estabelecimento
+(`403 ESTABLISHMENT_ACCESS_DENIED` caso contrário) — mesma checagem de todo
+endpoint `/api/merchant/establishments/{id}/*`.
 
 ## Ações do comércio
 

@@ -40,9 +40,9 @@ public class OrderServiceTests
 
         var response = await sut.CreateAsync(BuildCreateRequest(fx, quantity: 2), CancellationToken.None);
 
-        // (20 unit + 4 option) * 2 = 48 subtotal; ~1.1km * R$3/km but floors at min fee R$5.
+        // (20 unit + 4 option) * 2 = 48 subtotal; flat fee (OrderTestFixture) is R$7 regardless of distance.
         Assert.Equal(48m, response.Subtotal);
-        Assert.True(response.DeliveryFee >= 5m);
+        Assert.Equal(7m, response.DeliveryFee);
         Assert.Equal(response.Subtotal + response.DeliveryFee, response.Total);
         Assert.Equal("Pending", response.Status);
     }
@@ -414,7 +414,7 @@ public class OrderServiceTests
         var otherCity = new Domain.Cities.City { Name = "Outra Cidade", State = "SP", IsActive = true };
         fx.Db.Cities.Add(otherCity);
 
-        Guid AddDriver(Guid cityId, Domain.Drivers.DriverApprovalStatus approval, Domain.Drivers.DriverStatus status)
+        Guid AddDriver(Guid cityId, Domain.Drivers.DriverOnboardingStatus onboarding, Domain.Drivers.DriverStatus status)
         {
             var userId = Guid.NewGuid();
             fx.Db.Users.Add(new Domain.Identity.User { Id = userId, Name = "D", Email = $"{userId}@x.com", PhoneNumber = "1", PasswordHash = "x" });
@@ -422,15 +422,15 @@ public class OrderServiceTests
             {
                 UserId = userId, CityId = cityId, Cpf = Guid.NewGuid().ToString("N")[..11],
                 VehicleType = Domain.Drivers.VehicleType.Motorcycle, PixKeyType = Domain.Drivers.PixKeyType.Cpf, PixKey = "x",
-                ApprovalStatus = approval, Status = status
+                OnboardingStatus = onboarding, Status = status
             });
             return userId;
         }
 
-        var eligibleDriverUserId = AddDriver(fx.City.Id, Domain.Drivers.DriverApprovalStatus.Approved, Domain.Drivers.DriverStatus.Available);
-        AddDriver(fx.City.Id, Domain.Drivers.DriverApprovalStatus.Approved, Domain.Drivers.DriverStatus.Busy); // not available — excluded
-        AddDriver(fx.City.Id, Domain.Drivers.DriverApprovalStatus.PendingApproval, Domain.Drivers.DriverStatus.Available); // not approved — excluded
-        AddDriver(otherCity.Id, Domain.Drivers.DriverApprovalStatus.Approved, Domain.Drivers.DriverStatus.Available); // different city — excluded
+        var eligibleDriverUserId = AddDriver(fx.City.Id, Domain.Drivers.DriverOnboardingStatus.Approved, Domain.Drivers.DriverStatus.Available);
+        AddDriver(fx.City.Id, Domain.Drivers.DriverOnboardingStatus.Approved, Domain.Drivers.DriverStatus.Busy); // not available — excluded
+        AddDriver(fx.City.Id, Domain.Drivers.DriverOnboardingStatus.PendingDocuments, Domain.Drivers.DriverStatus.Available); // not approved — excluded
+        AddDriver(otherCity.Id, Domain.Drivers.DriverOnboardingStatus.Approved, Domain.Drivers.DriverStatus.Available); // different city — excluded
         await fx.Db.SaveChangesAsync();
 
         var notifications = new CapturingNotificationService();
@@ -562,5 +562,114 @@ public class OrderServiceTests
         var finalOrder = await verifyDb.Orders.SingleAsync(o => o.Id == order.Id);
         Assert.Equal(OrderStatus.Accepted, finalOrder.Status);
         Assert.Equal(1, finalOrder.Version);
+    }
+
+    // ---------------------------------------------------------------
+    // Fixed fee, radius, troco non-cash, establishment pause (driver-operations)
+    // ---------------------------------------------------------------
+
+    [Fact]
+    public async Task Create_DeliveryFee_SnapshotsAtOrderTime_UnaffectedByLaterSettingsChange()
+    {
+        var fx = await OrderTestFixture.CreateAsync();
+        var sut = BuildCustomerSut(fx);
+        var order = await sut.CreateAsync(BuildCreateRequest(fx, quantity: 1), CancellationToken.None);
+        Assert.Equal(7m, order.DeliveryFee);
+
+        var settings = fx.Db.DeliveryPricingSettings.Single();
+        settings.DeliveryFee = 15m;
+        await fx.Db.SaveChangesAsync();
+
+        var reloaded = fx.Db.Orders.Single(o => o.Id == order.Id);
+        Assert.Equal(7m, reloaded.DeliveryFee); // historical order unaffected by the settings change.
+    }
+
+    [Fact]
+    public async Task Create_Delivery_AddressBeyondRadius_ThrowsOutsideDeliveryArea()
+    {
+        var fx = await OrderTestFixture.CreateAsync();
+        fx.Db.DeliveryPricingSettings.Single().DeliveryRadiusKm = 0.1m; // customer address is ~1.1km away.
+        await fx.Db.SaveChangesAsync();
+        var sut = BuildCustomerSut(fx);
+
+        var ex = await Assert.ThrowsAsync<AppException>(() => sut.CreateAsync(BuildCreateRequest(fx), CancellationToken.None));
+        Assert.Equal("OUTSIDE_DELIVERY_AREA", ex.Code);
+    }
+
+    [Fact]
+    public async Task Preview_Delivery_AddressBeyondRadius_ThrowsOutsideDeliveryArea()
+    {
+        var fx = await OrderTestFixture.CreateAsync();
+        fx.Db.DeliveryPricingSettings.Single().DeliveryRadiusKm = 0.1m;
+        await fx.Db.SaveChangesAsync();
+        var sut = BuildCustomerSut(fx);
+
+        var ex = await Assert.ThrowsAsync<AppException>(() => sut.PreviewAsync(BuildCreateRequest(fx), CancellationToken.None));
+        Assert.Equal("OUTSIDE_DELIVERY_AREA", ex.Code);
+    }
+
+    [Fact]
+    public async Task Create_Delivery_WithinRadius_ChargesConfiguredFlatFee_RegardlessOfDistance()
+    {
+        var fx = await OrderTestFixture.CreateAsync();
+        fx.Db.DeliveryPricingSettings.Single().DeliveryFee = 12.5m;
+        await fx.Db.SaveChangesAsync();
+        var sut = BuildCustomerSut(fx);
+
+        var order = await sut.CreateAsync(BuildCreateRequest(fx, quantity: 1), CancellationToken.None);
+
+        Assert.Equal(12.5m, order.DeliveryFee);
+    }
+
+    [Fact]
+    public async Task Create_CashWithChange_Succeeds()
+    {
+        var fx = await OrderTestFixture.CreateAsync();
+        var sut = BuildCustomerSut(fx);
+        var request = new CreateOrderRequest(fx.Establishment.Id, fx.CustomerAddress.Id, "Cash", 100m,
+            [new CreateOrderItemRequest(fx.Product.Id, 1, [])], null);
+
+        var order = await sut.CreateAsync(request, CancellationToken.None);
+
+        Assert.Equal(100m, order.ChangeForAmount);
+    }
+
+    [Fact]
+    public async Task Create_PixWithChangeAmount_Throws()
+    {
+        var fx = await OrderTestFixture.CreateAsync();
+        var sut = BuildCustomerSut(fx);
+        var request = new CreateOrderRequest(fx.Establishment.Id, fx.CustomerAddress.Id, "Pix", 100m,
+            [new CreateOrderItemRequest(fx.Product.Id, 1, [])], null);
+
+        var ex = await Assert.ThrowsAsync<AppException>(() => sut.CreateAsync(request, CancellationToken.None));
+        Assert.Equal("CHANGE_AMOUNT_NOT_APPLICABLE", ex.Code);
+    }
+
+    [Fact]
+    public async Task Create_WhileEstablishmentPaused_ThrowsForBothDeliveryAndPickup()
+    {
+        var fx = await OrderTestFixture.CreateAsync();
+        fx.Establishment.OperationalStatus = Domain.Establishments.OperationalStatus.Paused;
+        fx.Establishment.PausedUntilUtc = null; // indefinite pause.
+        await fx.Db.SaveChangesAsync();
+        var sut = BuildCustomerSut(fx);
+
+        await Assert.ThrowsAsync<ConflictException>(() => sut.CreateAsync(BuildCreateRequest(fx), CancellationToken.None));
+        await Assert.ThrowsAsync<ConflictException>(() => sut.CreateAsync(BuildPickupRequest(fx), CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task Create_WhilePauseExpired_Succeeds_WithoutWaitingForTheExpiryJob()
+    {
+        var fx = await OrderTestFixture.CreateAsync();
+        fx.Establishment.OperationalStatus = Domain.Establishments.OperationalStatus.Paused;
+        fx.Establishment.PausedUntilUtc = DateTime.UtcNow.AddMinutes(-1); // already expired.
+        await fx.Db.SaveChangesAsync();
+        var sut = BuildCustomerSut(fx);
+
+        var order = await sut.CreateAsync(BuildPickupRequest(fx), CancellationToken.None);
+
+        Assert.Equal("Pending", order.Status);
     }
 }

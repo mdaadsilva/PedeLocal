@@ -27,6 +27,7 @@ public class EstablishmentConfiguration : IEntityTypeConfiguration<Establishment
         builder.Property(e => e.Email).HasMaxLength(256).IsRequired();
         builder.Property(e => e.OperationalStatus).HasConversion<string>().HasMaxLength(32);
         builder.Property(e => e.CommercialStatus).HasConversion<string>().HasMaxLength(32);
+        builder.Property(e => e.PauseReason).HasConversion<string>().HasMaxLength(32);
         builder.HasIndex(e => e.Slug).IsUnique();
         builder.HasIndex(e => e.CityId);
     }

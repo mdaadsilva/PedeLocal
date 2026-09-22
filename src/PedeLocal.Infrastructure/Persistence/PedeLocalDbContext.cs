@@ -63,10 +63,13 @@ public class PedeLocalDbContext : DbContext, IAppDbContext
 
     // Drivers
     public DbSet<Driver> Drivers => Set<Driver>();
+    public DbSet<DriverLicense> DriverLicenses => Set<DriverLicense>();
+    public DbSet<DriverVehicle> DriverVehicles => Set<DriverVehicle>();
 
     // Deliveries
     public DbSet<Delivery> Deliveries => Set<Delivery>();
     public DbSet<DeliveryConfirmation> DeliveryConfirmations => Set<DeliveryConfirmation>();
+    public DbSet<DeliveryOccurrence> DeliveryOccurrences => Set<DeliveryOccurrence>();
 
     // Finance
     public DbSet<DriverReceivable> DriverReceivables => Set<DriverReceivable>();

@@ -73,14 +73,14 @@ public class AuthService(IAppDbContext db, IPasswordHasher passwordHasher, IToke
             VehicleType = vehicleType,
             PixKeyType = pixKeyType,
             PixKey = request.PixKey,
-            ApprovalStatus = DriverApprovalStatus.PendingApproval,
+            OnboardingStatus = DriverOnboardingStatus.PendingDocuments,
             Status = DriverStatus.Offline
         };
         db.Drivers.Add(driver);
 
         await db.SaveChangesAsync(ct);
 
-        return new RegisterDriverResponse(user.Id, driver.Id, driver.ApprovalStatus.ToString());
+        return new RegisterDriverResponse(user.Id, driver.Id, driver.OnboardingStatus.ToString());
     }
 
     public async Task<AuthTokensResponse> LoginAsync(LoginRequest request, string? ip, CancellationToken ct)

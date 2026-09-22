@@ -1,5 +1,4 @@
 using PedeLocal.Application.Pricing;
-using PedeLocal.Domain.Addresses;
 using PedeLocal.Domain.Catalog;
 using PedeLocal.Domain.Deliveries;
 using PedeLocal.Domain.Drivers;
@@ -198,7 +197,7 @@ public static partial class DemoDataPlanner
         if (wantsDelivery)
         {
             distanceKm = ctx.Haversine.CalculateDistanceKm(info.Address.Latitude, info.Address.Longitude, customer.Address.Latitude, customer.Address.Longitude);
-            if (distanceKm > info.Pricing!.MaxDistanceKm)
+            if (distanceKm > info.Pricing!.DeliveryRadiusKm)
             {
                 wantsDelivery = false;
                 distanceKm = null;
@@ -233,7 +232,7 @@ public static partial class DemoDataPlanner
         string pricingSnapshotJson = "{}";
         if (orderType == OrderType.Delivery)
         {
-            var quote = DeliveryFeeCalculator.Calculate(info.Pricing!, AddressType.Urban, distanceKm!.Value);
+            var quote = DeliveryFeeCalculator.Calculate(info.Pricing!, distanceKm!.Value);
             deliveryFee = quote.Fee;
             pricingSnapshotJson = quote.PricingRuleSnapshotJson;
         }
@@ -605,7 +604,7 @@ public static partial class DemoDataPlanner
     private static DriverInfo? PickFreeDriver(Ctx ctx, int cityIndex)
     {
         var candidates = ctx.DriversByCity[cityIndex]
-            .Where(d => !d.Busy && d.Driver.ApprovalStatus == DriverApprovalStatus.Approved)
+            .Where(d => !d.Busy && d.Driver.OnboardingStatus == DriverOnboardingStatus.Approved && d.Driver.Status != DriverStatus.Blocked)
             .ToList();
         return candidates.Count == 0 ? null : PickOne(ctx.Rng, candidates);
     }

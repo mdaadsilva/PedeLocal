@@ -73,6 +73,8 @@ public sealed class DemoDataPlan
     public required List<InventoryMovement> InventoryMovements { get; init; }
 
     public required List<Driver> Drivers { get; init; }
+    public required List<DriverLicense> DriverLicenses { get; init; }
+    public required List<DriverVehicle> DriverVehicles { get; init; }
 
     public required List<Order> Orders { get; init; }
     public required List<OrderItem> OrderItems { get; init; }

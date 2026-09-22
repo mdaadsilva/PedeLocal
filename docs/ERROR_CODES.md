@@ -84,11 +84,12 @@ Toda resposta de erro da API segue o mesmo formato:
 | `INVALID_ITEM_QUANTITY` | 400 | Quantidade de item ≤ 0 |
 | `INVALID_OPTION_SELECTION` | 400 | Seleção de adicionais fora do min/max do grupo, ou opção inexistente |
 | `INVALID_CHANGE_AMOUNT` | 400 | Valor de troco menor que o total do pedido |
+| `CHANGE_AMOUNT_NOT_APPLICABLE` | 400 | `changeForAmount` informado com forma de pagamento diferente de `Cash` |
 | `ESTABLISHMENT_NOT_ACCEPTING_ORDERS` | 409 | `EstablishmentSettings.AcceptsNewOrders = false` |
 | `ESTABLISHMENT_SUSPENDED` | 409 | Estabelecimento suspenso (comercial) |
-| `ESTABLISHMENT_CLOSED` | 409 | Estabelecimento fechado no momento (operacional) |
+| `ESTABLISHMENT_CLOSED` | 409 | Estabelecimento fechado no momento (operacional) — inclui pausado (`OperationalStatus.Paused`) |
 | `DELIVERY_PRICING_NOT_CONFIGURED` | 409 | Estabelecimento sem taxa de entrega configurada (só se aplica a `orderType = Delivery`) |
-| `DELIVERY_NOT_AVAILABLE` | 400 | Distância acima do `maxDistanceKm` configurado |
+| `OUTSIDE_DELIVERY_AREA` | 400 | Distância acima do `deliveryRadiusKm` configurado (renomeado de `DELIVERY_NOT_AVAILABLE` — taxa é sempre fixa agora, essa distância só decide disponibilidade) |
 | `INVALID_ORDER_TRANSITION` | 409 | Ação não permitida no status atual do pedido, ou ação de retirada usada em pedido de entrega (e vice-versa) |
 | `INVALID_ORDER_TYPE` | 400 | `orderType` diferente de `Delivery`/`Pickup` |
 | `ADDRESS_REQUIRED` | 400 | `addressId` ausente em pedido `orderType = Delivery` |
@@ -99,8 +100,14 @@ Toda resposta de erro da API segue o mesmo formato:
 |---|---|---|
 | `DRIVER_PROFILE_NOT_FOUND` | 404 | Usuário autenticado não tem perfil de entregador |
 | `DRIVER_NOT_FOUND` | 404 | Entregador não encontrado (rotas admin) |
-| `DRIVER_NOT_APPROVED` | 403 | Cadastro do entregador ainda não aprovado |
+| `DRIVER_NOT_APPROVED` | 403 | Cadastro do entregador ainda não aprovado (`onboardingStatus != Approved`) |
 | `DRIVER_BLOCKED` | 403 | Entregador bloqueado pelo admin |
+| `DRIVER_DOCUMENT_EXPIRED` | 403 | CNH vencida — bloqueia ficar online e aceitar entrega |
+| `DRIVER_LICENSE_REQUIRED` | 400 | Admin tentou aprovar um entregador sem CNH cadastrada |
+| `DRIVER_VEHICLE_REQUIRED` | 400 | Admin tentou aprovar um entregador sem veículo cadastrado |
+| `INVALID_VEHICLE_TYPE` | 400 | Tipo de veículo inválido ao enviar dados do veículo |
+| `INVALID_OCCURRENCE_TYPE` | 400 | Tipo de ocorrência de entrega inválido |
+| `OCCURRENCE_ACCESS_DENIED` | 403 | Usuário não é o entregador da entrega, nem staff do estabelecimento, nem Super Admin |
 | `DRIVER_ON_DELIVERY` | 409 | Ação de status bloqueada porque há entrega em andamento |
 | `DRIVER_ALREADY_ON_DELIVERY` | 409 | Tentou aceitar uma entrega já estando ocupado |
 | `DELIVERY_NOT_FOUND` | 404 | Entrega não encontrada |
@@ -112,6 +119,13 @@ Toda resposta de erro da API segue o mesmo formato:
 | `DELIVERY_CODE_LOCKED` | 409 | Excedeu o número máximo de tentativas (5) |
 | `DELIVERY_CODE_ALREADY_USED` | 409 | Cliente tentou consultar (`GET /api/orders/{id}/delivery-code`) um código que já foi usado para confirmar a entrega |
 | `INVALID_DELIVERY_CODE` | 400 | Código digitado não confere |
+
+### Pausa do estabelecimento (`api/merchant/establishments/{id}/pause`)
+
+| Código | Status | Significado |
+|---|---|---|
+| `INVALID_PAUSE_REASON` | 400 | `reason` diferente de `HighDemand`/`NoDriverAvailable`/`TemporaryClosure`/`Other` |
+| `INVALID_PAUSE_UNTIL` | 400 | `pausedUntilUtc` informado no passado |
 
 ### Financeiro / Assinatura
 
@@ -125,7 +139,6 @@ Toda resposta de erro da API segue o mesmo formato:
 | `PAYMENT_BATCH_ACCESS_DENIED` | 403 | Lote pertence a outro entregador |
 | `PAYMENT_NOT_REPORTED` | 409 | Entregador tentou confirmar recebimento antes do estabelecimento reportar |
 | `SUBSCRIPTION_NOT_FOUND` | 404 | Assinatura não configurada para o estabelecimento |
-| `INVALID_DELIVERY_FEE_MODE` | 400 | `urbanMode`/`ruralMode` inválido (deve ser `Fixed` ou `PerKm`) |
 
 ### Upload
 

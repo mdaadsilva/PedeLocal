@@ -53,9 +53,12 @@ public interface IAppDbContext
     DbSet<OrderStatusHistory> OrderStatusHistories { get; }
 
     DbSet<Driver> Drivers { get; }
+    DbSet<DriverLicense> DriverLicenses { get; }
+    DbSet<DriverVehicle> DriverVehicles { get; }
 
     DbSet<Delivery> Deliveries { get; }
     DbSet<DeliveryConfirmation> DeliveryConfirmations { get; }
+    DbSet<DeliveryOccurrence> DeliveryOccurrences { get; }
 
     DbSet<DriverReceivable> DriverReceivables { get; }
     DbSet<DriverPaymentBatch> DriverPaymentBatches { get; }

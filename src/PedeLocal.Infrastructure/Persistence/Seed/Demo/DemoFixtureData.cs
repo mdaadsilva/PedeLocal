@@ -188,6 +188,8 @@ public static class DemoFixtureData
         ])
     ];
 
+    public static readonly string[] VehicleColors = ["Prata", "Preto", "Branco", "Vermelho", "Azul", "Cinza"];
+
     public static readonly string[] FirstNames =
     [
         "Ana", "Bruno", "Carla", "Daniel", "Eduarda", "Fábio", "Gabriela", "Hugo", "Isabela", "João",

@@ -17,9 +17,21 @@ public enum PixKeyType
     Random
 }
 
-public enum DriverApprovalStatus
+/// <summary>The driver's vetting/compliance lifecycle — distinct from <see cref="DriverStatus"/>,
+/// which is real-time presence (online/offline/busy/blocked). A simple CPF registration is not
+/// authorization to work: a driver must submit CNH + vehicle documents (PendingDocuments →
+/// UnderReview) and be reviewed by a SUPER_ADMIN (→ Approved/Rejected) before they can go online.
+/// There is deliberately no "Suspended" value here — <see cref="DriverStatus.Blocked"/> already
+/// covers "temporarily prevent an approved driver from working," so adding a second suspension
+/// concept at this layer would just be a duplicate state machine. Likewise there is no
+/// "DocumentExpired" value: expiry is a time-dependent fact computed by
+/// <see cref="DriverEligibilityService"/> from <see cref="DriverLicense.ExpiresAt"/>, not a stored
+/// workflow state — persisting it would require a background job to keep it truthful and would
+/// conflict with the real vetting decision (Approved) once the driver renews their CNH.</summary>
+public enum DriverOnboardingStatus
 {
-    PendingApproval,
+    PendingDocuments,
+    UnderReview,
     Approved,
     Rejected
 }
@@ -42,11 +54,12 @@ public class Driver : BaseEntity
     public PixKeyType PixKeyType { get; set; }
     public string PixKey { get; set; } = string.Empty;
 
-    public DriverApprovalStatus ApprovalStatus { get; set; } = DriverApprovalStatus.PendingApproval;
+    public DriverOnboardingStatus OnboardingStatus { get; set; } = DriverOnboardingStatus.PendingDocuments;
     public DriverStatus Status { get; set; } = DriverStatus.Offline;
 
-    public DateTime? ApprovedAtUtc { get; set; }
-    public Guid? ApprovedByUserId { get; set; }
-
-    public bool CanWork => ApprovalStatus == DriverApprovalStatus.Approved && Status != DriverStatus.Blocked;
+    /// <summary>Set whichever way the SUPER_ADMIN's decision went (Approved or Rejected) — covers
+    /// both actions instead of duplicating Approved*/Rejected* timestamp pairs.</summary>
+    public DateTime? ReviewedAtUtc { get; set; }
+    public Guid? ReviewedByUserId { get; set; }
+    public string? RejectionReason { get; set; }
 }

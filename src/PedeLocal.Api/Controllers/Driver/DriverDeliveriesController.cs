@@ -46,4 +46,14 @@ public class DriverDeliveriesController(DeliveryService deliveryService) : Contr
     [ProducesResponseType(typeof(DeliveryResponse), StatusCodes.Status200OK)]
     public async Task<IActionResult> Confirm(Guid id, ConfirmDeliveryRequest request, CancellationToken ct) =>
         Ok(await deliveryService.ConfirmAsync(id, request, ct));
+
+    [HttpPost("{id:guid}/occurrences")]
+    [ProducesResponseType(typeof(DeliveryOccurrenceResponse), StatusCodes.Status201Created)]
+    public async Task<IActionResult> AddOccurrence(Guid id, CreateDeliveryOccurrenceRequest request, CancellationToken ct) =>
+        Ok(await deliveryService.AddOccurrenceAsync(id, request, ct));
+
+    [HttpGet("{id:guid}/occurrences")]
+    [ProducesResponseType(typeof(List<DeliveryOccurrenceResponse>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetOccurrences(Guid id, CancellationToken ct) =>
+        Ok(await deliveryService.GetOccurrencesAsync(id, ct));
 }

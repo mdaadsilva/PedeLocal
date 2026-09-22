@@ -211,6 +211,76 @@ public class DemoDataPlannerTests
     }
 
     [Fact]
+    public void Plan_Demo_DriverOnboardingCoversEveryStatus_AndSomeHaveExpiredLicenses()
+    {
+        var plan = DemoDataPlanner.Plan(DemoSeedProfile.Demo);
+        var licenseByDriverId = plan.DriverLicenses.ToDictionary(l => l.DriverId);
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+
+        Assert.Contains(plan.Drivers, d => d.OnboardingStatus == Domain.Drivers.DriverOnboardingStatus.PendingDocuments);
+        Assert.Contains(plan.Drivers, d => d.OnboardingStatus == Domain.Drivers.DriverOnboardingStatus.UnderReview);
+        Assert.Contains(plan.Drivers, d => d.OnboardingStatus == Domain.Drivers.DriverOnboardingStatus.Rejected && d.RejectionReason != null);
+        Assert.Contains(plan.Drivers, d => d.OnboardingStatus == Domain.Drivers.DriverOnboardingStatus.Approved && d.Status == Domain.Drivers.DriverStatus.Blocked);
+        Assert.Contains(plan.Drivers,
+            d => d.OnboardingStatus == Domain.Drivers.DriverOnboardingStatus.Approved &&
+                 licenseByDriverId.TryGetValue(d.Id, out var l) && l.ExpiresAt < today);
+
+        // PendingDocuments drivers never have a license/vehicle on file; everyone else does.
+        foreach (var driver in plan.Drivers)
+        {
+            var hasLicense = licenseByDriverId.ContainsKey(driver.Id);
+            if (driver.OnboardingStatus == Domain.Drivers.DriverOnboardingStatus.PendingDocuments)
+            {
+                Assert.False(hasLicense);
+            }
+            else
+            {
+                Assert.True(hasLicense);
+            }
+        }
+    }
+
+    [Fact]
+    public void Plan_Demo_HasPausedEstablishments_WithReasonSet()
+    {
+        var plan = DemoDataPlanner.Plan(DemoSeedProfile.Demo);
+        var paused = plan.Establishments.Where(e => e.OperationalStatus == OperationalStatus.Paused).ToList();
+
+        Assert.NotEmpty(paused);
+        Assert.All(paused, e => Assert.NotNull(e.PauseReason));
+    }
+
+    [Fact]
+    public void Plan_Large_PausedEstablishments_HaveVariedExpiry()
+    {
+        // LARGE has enough establishments that all three PausedUntilUtc buckets (still paused,
+        // already expired, indefinite) are reliably represented — DEMO's much smaller sample can
+        // land entirely in one or two buckets by chance with this deterministic seed.
+        var plan = DemoDataPlanner.Plan(DemoSeedProfile.Large);
+        var paused = plan.Establishments.Where(e => e.OperationalStatus == OperationalStatus.Paused).ToList();
+
+        Assert.NotEmpty(paused);
+        Assert.Contains(paused, e => e.PausedUntilUtc == null);
+        Assert.Contains(paused, e => e.PausedUntilUtc != null && e.PausedUntilUtc > DateTime.UtcNow);
+        Assert.Contains(paused, e => e.PausedUntilUtc != null && e.PausedUntilUtc <= DateTime.UtcNow);
+    }
+
+    [Fact]
+    public void Plan_Demo_DeliveryPricing_UsesFlatFeeAndRadius()
+    {
+        var plan = DemoDataPlanner.Plan(DemoSeedProfile.Demo);
+
+        Assert.NotEmpty(plan.DeliveryPricingSettingsList);
+        Assert.All(plan.DeliveryPricingSettingsList, p =>
+        {
+            Assert.True(p.DeliveryFee > 0);
+            Assert.True(p.DeliveryRadiusKm > 0);
+        });
+        // Varied, not one identical value everywhere.
+        Assert.True(plan.DeliveryPricingSettingsList.Select(p => p.DeliveryFee).Distinct().Count() > 1);
+    }
+
+    [Fact]
     public void Plan_CommercialStatus_MatchesSubscriptionTierMapping()
     {
         var plan = DemoDataPlanner.Plan(DemoSeedProfile.Demo);

@@ -27,4 +27,4 @@ public record AuthTokensResponse(string AccessToken, string RefreshToken, DateTi
 
 public record RegisterCustomerResponse(Guid UserId, string Name, string Email);
 
-public record RegisterDriverResponse(Guid UserId, Guid DriverId, string ApprovalStatus);
+public record RegisterDriverResponse(Guid UserId, Guid DriverId, string OnboardingStatus);

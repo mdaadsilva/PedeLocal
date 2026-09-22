@@ -1,9 +1,11 @@
+using PedeLocal.Application.Common;
 using PedeLocal.Application.Common.Exceptions;
 using PedeLocal.Application.Establishments;
 using PedeLocal.Contracts.Common;
 using PedeLocal.Contracts.Establishments;
 using PedeLocal.Domain.Cities;
 using PedeLocal.Domain.Establishments;
+using PedeLocal.Domain.Identity;
 using PedeLocal.Infrastructure.Identity;
 using PedeLocal.UnitTests.TestSupport;
 using Xunit;
@@ -21,7 +23,8 @@ public class EstablishmentServiceTests
         db.EstablishmentCategories.Add(category);
         await db.SaveChangesAsync();
 
-        return (new EstablishmentService(db, new BCryptPasswordHasher()), db, city, category);
+        var superAdmin = new FakeCurrentUserService(Guid.NewGuid(), RoleNames.SuperAdmin);
+        return (new EstablishmentService(db, new BCryptPasswordHasher(), new EstablishmentAccessGuard(db, superAdmin)), db, city, category);
     }
 
     private static CreateEstablishmentRequest BuildRequest(Guid cityId, Guid categoryId, string adminEmail = "admin@lanchonete.com") =>
@@ -84,5 +87,60 @@ public class EstablishmentServiceTests
         var results = await sut.SearchForCustomersAsync(city.Id, new PageRequest(), CancellationToken.None);
 
         Assert.Contains(results.Items, e => e.Id == created.Id);
+    }
+
+    // ---------------------------------------------------------------
+    // Pause / resume (section 12)
+    // ---------------------------------------------------------------
+
+    [Fact]
+    public async Task Pause_ByStaff_SetsOperationalStatusPausedWithReason()
+    {
+        var (adminSut, db, city, category) = await CreateSutAsync();
+        var created = await adminSut.CreateAsync(BuildRequest(city.Id, category.Id), CancellationToken.None);
+        var staffUserId = db.EstablishmentUsers.Single(eu => eu.EstablishmentId == created.Id).UserId;
+
+        var staffSut = new EstablishmentService(db, new BCryptPasswordHasher(), new EstablishmentAccessGuard(db, new FakeCurrentUserService(staffUserId)));
+        var response = await staffSut.PauseAsync(created.Id, new PauseEstablishmentRequest("HighDemand", null), staffUserId, CancellationToken.None);
+
+        Assert.Equal("Paused", response.OperationalStatus);
+        Assert.Equal("HighDemand", response.PauseReason);
+        Assert.NotNull(response.PausedAtUtc);
+    }
+
+    [Fact]
+    public async Task Pause_ByUnrelatedUser_Throws()
+    {
+        var (adminSut, db, city, category) = await CreateSutAsync();
+        var created = await adminSut.CreateAsync(BuildRequest(city.Id, category.Id), CancellationToken.None);
+
+        var strangerSut = new EstablishmentService(db, new BCryptPasswordHasher(), new EstablishmentAccessGuard(db, new FakeCurrentUserService(Guid.NewGuid())));
+        await Assert.ThrowsAsync<ForbiddenException>(() =>
+            strangerSut.PauseAsync(created.Id, new PauseEstablishmentRequest("Other", null), Guid.NewGuid(), CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task Resume_ClearsAllPauseFields()
+    {
+        var (adminSut, db, city, category) = await CreateSutAsync();
+        var created = await adminSut.CreateAsync(BuildRequest(city.Id, category.Id), CancellationToken.None);
+        await adminSut.PauseAsync(created.Id, new PauseEstablishmentRequest("TemporaryClosure", null), Guid.NewGuid(), CancellationToken.None);
+
+        var resumed = await adminSut.ResumeAsync(created.Id, Guid.NewGuid(), CancellationToken.None);
+
+        Assert.Equal("Open", resumed.OperationalStatus);
+        Assert.Null(resumed.PauseReason);
+        Assert.Null(resumed.PausedAtUtc);
+        Assert.Null(resumed.PausedUntilUtc);
+    }
+
+    [Fact]
+    public async Task Pause_WithPastPausedUntil_Throws()
+    {
+        var (adminSut, _, city, category) = await CreateSutAsync();
+        var created = await adminSut.CreateAsync(BuildRequest(city.Id, category.Id), CancellationToken.None);
+
+        await Assert.ThrowsAsync<AppException>(() =>
+            adminSut.PauseAsync(created.Id, new PauseEstablishmentRequest("Other", DateTime.UtcNow.AddMinutes(-5)), Guid.NewGuid(), CancellationToken.None));
     }
 }

@@ -59,9 +59,8 @@ public static class IntegrationDataSeeder
         db.DeliveryPricingSettings.Add(new DeliveryPricingSettings
         {
             EstablishmentId = establishment.Id,
-            UrbanMode = DeliveryFeeMode.PerKm, UrbanPricePerKm = 3m, UrbanMinFee = 5m,
-            RuralMode = DeliveryFeeMode.PerKm, RuralPricePerKm = 3m, RuralMinFee = 15m,
-            MaxDistanceKm = 50
+            DeliveryFee = 7m,
+            DeliveryRadiusKm = 50
         });
 
         var category = new MenuCategory { EstablishmentId = establishment.Id, Name = "Lanches" };
@@ -122,9 +121,18 @@ public static class IntegrationDataSeeder
         var driver = new Driver
         {
             UserId = user.Id, CityId = cityId, Cpf = Guid.NewGuid().ToString("N")[..11], VehicleType = VehicleType.Motorcycle,
-            PixKeyType = PixKeyType.Cpf, PixKey = "x", ApprovalStatus = DriverApprovalStatus.Approved, Status = DriverStatus.Available
+            PixKeyType = PixKeyType.Cpf, PixKey = "x", OnboardingStatus = DriverOnboardingStatus.Approved, Status = DriverStatus.Available
         };
         db.Drivers.Add(driver);
+        db.DriverLicenses.Add(new DriverLicense
+        {
+            DriverId = driver.Id, RegistrationNumber = "12345678901", Category = "A",
+            ExpiresAt = DateOnly.FromDateTime(DateTime.UtcNow.AddYears(2))
+        });
+        db.DriverVehicles.Add(new DriverVehicle
+        {
+            DriverId = driver.Id, Type = VehicleType.Motorcycle, Plate = "TST0001", Model = "Honda CG 160", Color = "Preto"
+        });
 
         await db.SaveChangesAsync();
         return (email, user.Id, driver.Id);
