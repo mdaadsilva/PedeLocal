@@ -141,6 +141,45 @@ export class ApiClient {
     return (await response.json()) as DriverProfile;
   }
 
+  /** Onboarding now requires CNH + vehicle on file before a SUPER_ADMIN can approve
+   * (DRIVER_LICENSE_REQUIRED / DRIVER_VEHICLE_REQUIRED otherwise) — called with the
+   * driver's OWN token, before approveDriver. */
+  async submitDriverLicense(token: string): Promise<void> {
+    const expiresAt = new Date();
+    expiresAt.setFullYear(expiresAt.getFullYear() + 3);
+    const response = await this.request.put(
+      `${this.baseUrl}/api/driver/me/documents/license`,
+      {
+        headers: this.bearer(token),
+        data: {
+          registrationNumber: `E2E${Date.now()}`.slice(0, 32),
+          category: "A",
+          expiresAt: expiresAt.toISOString().slice(0, 10),
+          hasEar: true,
+          documentImageUrl: null,
+        },
+      },
+    );
+    await this.expectStatus(response, 200);
+  }
+
+  async submitDriverVehicle(token: string): Promise<void> {
+    const response = await this.request.put(
+      `${this.baseUrl}/api/driver/me/documents/vehicle`,
+      {
+        headers: this.bearer(token),
+        data: {
+          type: "Motorcycle",
+          plate: `E2E${Date.now()}`.slice(0, 16),
+          model: "CG 160",
+          color: "Preto",
+          documentImageUrl: null,
+        },
+      },
+    );
+    await this.expectStatus(response, 200);
+  }
+
   async putDeliveryPricing(
     token: string,
     establishmentId: string,
@@ -150,15 +189,11 @@ export class ApiClient {
       {
         headers: this.bearer(token),
         data: {
-          urbanMode: "Fixed",
-          urbanFixedFee: 5,
-          urbanPricePerKm: 0,
-          urbanMinFee: 0,
-          ruralMode: "Fixed",
-          ruralFixedFee: 15,
-          ruralPricePerKm: 0,
-          ruralMinFee: 0,
-          maxDistanceKm: 50,
+          // Flat fee model (Urban/Rural x Fixed/PerKm was removed) — 5 keeps every existing
+          // `expect(...deliveryFee).toBe(5)` assertion valid, 50 mirrors the old maxDistanceKm
+          // so it comfortably covers the ~150m customer address bootstrapShop creates.
+          deliveryFee: 5,
+          deliveryRadiusKm: 50,
         },
       },
     );

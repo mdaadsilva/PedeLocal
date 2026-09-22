@@ -136,14 +136,15 @@ export type DriverProfile = {
   id: string;
   userId: string;
   cityId: string;
-  approvalStatus: string;
+  onboardingStatus: string;
+  eligibilityStatus: string;
   status: string;
 };
 
 export type RegisterDriverResponse = {
   userId: string;
   driverId: string;
-  approvalStatus: string;
+  onboardingStatus: string;
 };
 
 export type RegisterCustomerResponse = {

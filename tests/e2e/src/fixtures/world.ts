@@ -212,8 +212,13 @@ export async function registerApprovedDriver(
     pixKeyType: "Email",
     pixKey: email,
   });
-  await api.approveDriver(adminToken, registered.driverId);
   const tokens = await api.login(email, password);
+  // Onboarding gate: a SUPER_ADMIN can only approve once CNH + vehicle are on file
+  // (DRIVER_LICENSE_REQUIRED / DRIVER_VEHICLE_REQUIRED otherwise) — submitted with the
+  // driver's own token, before the admin approve call.
+  await api.submitDriverLicense(tokens.accessToken);
+  await api.submitDriverVehicle(tokens.accessToken);
+  await api.approveDriver(adminToken, registered.driverId);
   await api.driverOnline(tokens.accessToken);
   return { email, password, tokens, driverId: registered.driverId };
 }

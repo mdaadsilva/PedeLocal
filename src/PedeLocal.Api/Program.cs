@@ -268,7 +268,7 @@ try
         recurringJobManager.AddOrUpdate<EstablishmentPauseExpiryJob>(
             "establishment-pause-expiry",
             job => job.RunAsync(CancellationToken.None),
-            Cron.MinuteInterval(15), // a pause is hours-long, not days-long — needs a much tighter cadence than the daily grace-period job.
+            "*/15 * * * *", // a pause is hours-long, not days-long — needs a much tighter cadence than the daily grace-period job.
             new RecurringJobOptions { TimeZone = TimeZoneInfo.Utc });
     }
 
