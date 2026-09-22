@@ -48,10 +48,9 @@ class DriverHomeController extends AsyncNotifier<DriverHomeState> {
     DriverRepository repository,
     DriverProfile profile,
   ) async {
-    if (!profile.isApproved) {
-      return DriverHomeState(profile: profile);
-    }
-
+    // `Busy`/`Available` só ocorrem para um entregador já `Approved` — não
+    // é preciso checar elegibilidade aqui: se não for, o status já vem
+    // `Offline`/`Blocked` do backend e cai direto no `return` final.
     if (profile.isBusy) {
       final current = await repository.getCurrentDelivery();
       return DriverHomeState(profile: profile, currentDelivery: current);
@@ -172,6 +171,33 @@ class DriverHomeController extends AsyncNotifier<DriverHomeState> {
       _runDeliveryAction(
         (repository) => repository.confirmDelivery(deliveryId, code),
       );
+
+  /// Registra uma ocorrência operacional na entrega atual
+  /// (`docs/DELIVERY_FLOW.md#ocorrências-na-entrega`) — não altera o status
+  /// da entrega nem exige recarregar o estado inteiro, só bloqueia novas
+  /// ações enquanto a chamada está em andamento.
+  Future<void> reportOccurrence(
+    String deliveryId,
+    String type,
+    String? note,
+  ) async {
+    final current = state.value;
+    if (current == null || current.isProcessingAction) return;
+
+    state = AsyncValue.data(current.copyWith(isProcessingAction: true));
+    final repository = ref.read(driverRepositoryProvider);
+
+    try {
+      await repository.addOccurrence(deliveryId, type, note);
+      final latest = state.value;
+      if (latest != null) {
+        state = AsyncValue.data(latest.copyWith(isProcessingAction: false));
+      }
+    } on AppException {
+      state = AsyncValue.data(current.copyWith(isProcessingAction: false));
+      rethrow;
+    }
+  }
 
   Future<void> _runDeliveryAction(
     Future<Delivery> Function(DriverRepository repository) action,

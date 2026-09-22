@@ -4,12 +4,28 @@ export const ORDER_STATUS_LABEL: Record<string, string> = {
   Preparing: "Em preparo",
   Ready: "Pronto",
   WaitingDriver: "Aguardando entregador",
-  DriverAssigned: "Entregador a caminho",
-  PickedUp: "Retirado na loja",
-  OutForDelivery: "Saiu para entrega",
-  Delivered: "Entregue",
+  DriverAssigned: "Motorista aceitou",
+  PickedUp: "Motorista retirou o pedido",
+  OutForDelivery: "Em trânsito",
+  Delivered: "Concluída",
   PickupCompleted: "Retirado pelo cliente",
   Cancelled: "Cancelado",
+};
+
+export const OCCURRENCE_TYPE_LABEL: Record<string, string> = {
+  CustomerNotFound: "Cliente não encontrado",
+  CustomerNotResponding: "Cliente não responde",
+  WrongAddress: "Endereço incorreto",
+  PaymentProblem: "Problema de pagamento",
+  VehicleProblem: "Problema no veículo",
+  Other: "Outro",
+};
+
+export const PAUSE_REASON_LABEL: Record<string, string> = {
+  HighDemand: "Alta demanda",
+  NoDriverAvailable: "Sem entregador disponível",
+  TemporaryClosure: "Fechamento temporário",
+  Other: "Outro",
 };
 
 export const PAYMENT_LABEL: Record<string, string> = {
@@ -31,4 +47,8 @@ export function orderStatusLabel(status: string) {
 
 export function paymentLabel(method: string) {
   return PAYMENT_LABEL[method] ?? method;
+}
+
+export function labelOf(map: Record<string, string>, value: string) {
+  return map[value] ?? value;
 }

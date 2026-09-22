@@ -157,12 +157,12 @@ void main() {
     expect(container.read(cartControllerProvider).isEmpty, isFalse);
   });
 
-  test('submit propaga DELIVERY_NOT_AVAILABLE e mantém o carrinho', () async {
+  test('submit propaga OUTSIDE_DELIVERY_AREA e mantém o carrinho', () async {
     final container = await containerWithCartItem();
     stubCreate(
       error: const AppException(
-        code: 'DELIVERY_NOT_AVAILABLE',
-        message: 'Este endereço está fora da área de entrega.',
+        code: 'OUTSIDE_DELIVERY_AREA',
+        message: 'Este estabelecimento não entrega neste endereço.',
         statusCode: 400,
       ),
     );
@@ -175,10 +175,10 @@ void main() {
           paymentMethod: PaymentMethodOption.pix,
         );
 
-    expect(
-      (container.read(checkoutControllerProvider).error as AppException).code,
-      'DELIVERY_NOT_AVAILABLE',
-    );
+    final error =
+        container.read(checkoutControllerProvider).error as AppException;
+    expect(error.code, 'OUTSIDE_DELIVERY_AREA');
+    expect(error.message, 'Este estabelecimento não entrega neste endereço.');
     expect(container.read(cartControllerProvider).isEmpty, isFalse);
   });
 

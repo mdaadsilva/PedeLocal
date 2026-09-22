@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../../core/network/app_exception.dart';
 import '../../../core/notifications/recent_notification_feedback.dart';
+import '../../../core/routing/app_routes.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/theme/app_typography.dart';
 import '../../../core/widgets/empty_state_view.dart';
@@ -109,6 +111,8 @@ class _DriverHomeBody extends ConsumerWidget {
               context,
               ref.read(driverHomeControllerProvider.notifier).goOffline,
             ),
+            onCompleteOnboarding: () =>
+                context.push(AppRoutes.driverOnboarding),
           ),
           const SizedBox(height: AppSpacing.lg),
           ..._buildSectionContent(context, ref, profile),
@@ -136,30 +140,11 @@ class _DriverHomeBody extends ConsumerWidget {
     WidgetRef ref,
     DriverProfile profile,
   ) {
-    if (!profile.isApproved) {
-      return [
-        EmptyStateView(
-          title: profile.approvalStatus == 'Rejected'
-              ? 'Cadastro não aprovado'
-              : 'Aguardando aprovação',
-          message: profile.approvalStatus == 'Rejected'
-              ? 'Seu cadastro de entregador não foi aprovado. Entre em contato com o suporte para mais informações.'
-              : 'Seu cadastro está em análise pelo administrador. Você poderá ficar online assim que for aprovado.',
-          icon: profile.approvalStatus == 'Rejected'
-              ? Icons.block_rounded
-              : Icons.hourglass_top_rounded,
-        ),
-      ];
-    }
-
-    if (profile.isBlocked) {
-      return [
-        const EmptyStateView(
-          title: 'Conta bloqueada',
-          message: 'Seu acesso como entregador foi bloqueado. Entre em contato com o suporte.',
-          icon: Icons.block_rounded,
-        ),
-      ];
+    // Não elegível e sem entrega em andamento: o `DriverStatusCard` já
+    // explica o motivo (`eligibilityMessage`) e oferece o caminho para
+    // completar/atualizar o cadastro — nada mais a mostrar aqui.
+    if (!profile.isEligible && !profile.isBusy) {
+      return const [];
     }
 
     if (profile.isBusy) {
@@ -182,6 +167,8 @@ class _DriverHomeBody extends ConsumerWidget {
               context,
               () => notifier.confirmDelivery(current.id, code),
             ),
+            onReportOccurrence: (type, note) =>
+                _reportOccurrence(context, notifier, current.id, type, note),
           )
         else
           const EmptyStateView(
@@ -224,6 +211,27 @@ class _DriverHomeBody extends ConsumerWidget {
         icon: Icons.wifi_off_rounded,
       ),
     ];
+  }
+
+  Future<void> _reportOccurrence(
+    BuildContext context,
+    DriverHomeController notifier,
+    String deliveryId,
+    String type,
+    String? note,
+  ) async {
+    try {
+      await notifier.reportOccurrence(deliveryId, type, note);
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(const SnackBar(content: Text('Ocorrência registrada.')));
+    } on AppException catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(content: Text(e.message)));
+    }
   }
 
   /// `409 DELIVERY_ALREADY_TAKEN` é fluxo normal em horário de pico — o

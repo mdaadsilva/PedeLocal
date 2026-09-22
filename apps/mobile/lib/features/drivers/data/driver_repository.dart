@@ -5,6 +5,8 @@ import '../../../core/network/api_client.dart';
 import '../../../core/network/app_exception.dart';
 import '../domain/delivery.dart';
 import '../domain/delivery_detail.dart';
+import '../domain/delivery_occurrence.dart';
+import '../domain/driver_documents.dart';
 import '../domain/driver_profile.dart';
 import '../domain/driver_receivable.dart';
 
@@ -28,7 +30,98 @@ class DriverRepository {
     }
   }
 
-  /// `Offline → Available`. Falha (`409`) se `PendingApproval`/`Blocked`/`Busy`.
+  /// `GET /api/driver/me/documents` — CNH + veículo já enviados até agora
+  /// (qualquer um pode ser `null` antes do envio).
+  Future<DriverDocuments> getMyDocuments() async {
+    try {
+      final response = await _dio.get<Map<String, dynamic>>(
+        '/api/driver/me/documents',
+      );
+      return DriverDocuments.fromJson(response.data!);
+    } on DioException catch (e) {
+      throw AppException.fromDioException(e);
+    }
+  }
+
+  /// `PUT /api/driver/me/documents/license` — submeter/atualizar a CNH.
+  /// `422 VALIDATION_ERROR` se a CNH enviada já estiver vencida.
+  Future<DriverDocuments> submitLicense({
+    required String registrationNumber,
+    required String category,
+    required DateTime expiresAt,
+    bool? hasEar,
+    String? documentImageUrl,
+  }) async {
+    try {
+      final response = await _dio.put<Map<String, dynamic>>(
+        '/api/driver/me/documents/license',
+        data: {
+          'registrationNumber': registrationNumber,
+          'category': category,
+          'expiresAt': _dateOnly(expiresAt),
+          'hasEar': hasEar,
+          'documentImageUrl': documentImageUrl,
+        },
+      );
+      return DriverDocuments.fromJson(response.data!);
+    } on DioException catch (e) {
+      throw AppException.fromDioException(e);
+    }
+  }
+
+  /// `PUT /api/driver/me/documents/vehicle` — submeter/atualizar o veículo.
+  /// Trocar o `type` depois de `Approved` volta o entregador para
+  /// `UnderReview` (`docs/DRIVER_ONBOARDING.md`).
+  Future<DriverDocuments> submitVehicle({
+    required String type,
+    String? plate,
+    required String model,
+    required String color,
+    String? documentImageUrl,
+  }) async {
+    try {
+      final response = await _dio.put<Map<String, dynamic>>(
+        '/api/driver/me/documents/vehicle',
+        data: {
+          'type': type,
+          'plate': plate,
+          'model': model,
+          'color': color,
+          'documentImageUrl': documentImageUrl,
+        },
+      );
+      return DriverDocuments.fromJson(response.data!);
+    } on DioException catch (e) {
+      throw AppException.fromDioException(e);
+    }
+  }
+
+  static String _dateOnly(DateTime date) {
+    final year = date.year.toString().padLeft(4, '0');
+    final month = date.month.toString().padLeft(2, '0');
+    final day = date.day.toString().padLeft(2, '0');
+    return '$year-$month-$day';
+  }
+
+  /// `POST /api/driver/deliveries/{id}/occurrences` — registro imutável de
+  /// problema operacional (`docs/DELIVERY_FLOW.md#ocorrências-na-entrega`).
+  Future<DeliveryOccurrence> addOccurrence(
+    String deliveryId,
+    String type,
+    String? note,
+  ) async {
+    try {
+      final response = await _dio.post<Map<String, dynamic>>(
+        '/api/driver/deliveries/$deliveryId/occurrences',
+        data: {'type': type, 'note': note},
+      );
+      return DeliveryOccurrence.fromJson(response.data!);
+    } on DioException catch (e) {
+      throw AppException.fromDioException(e);
+    }
+  }
+
+  /// `Offline → Available`. Falha (`409`) se não `Eligible`/`Blocked`/`Busy`.
   Future<DriverProfile> goOnline() async {
     try {
       final response = await _dio.post<Map<String, dynamic>>(

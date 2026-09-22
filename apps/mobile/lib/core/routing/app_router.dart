@@ -9,7 +9,10 @@ import '../../features/auth/presentation/register_driver_screen.dart';
 import '../../features/cart/presentation/cart_screen.dart';
 import '../../features/cities/application/selected_city_controller.dart';
 import '../../features/cities/presentation/city_selection_screen.dart';
+import '../../features/drivers/presentation/driver_license_form_screen.dart';
+import '../../features/drivers/presentation/driver_onboarding_screen.dart';
 import '../../features/drivers/presentation/driver_receivables_screen.dart';
+import '../../features/drivers/presentation/driver_vehicle_form_screen.dart';
 import '../../features/drivers/presentation/home_driver_screen.dart';
 import '../../features/establishments/presentation/establishment_detail_screen.dart';
 import '../../features/home_customer/presentation/home_customer_screen.dart';
@@ -79,6 +82,18 @@ final goRouterProvider = Provider<GoRouter>((ref) {
         builder: (context, state) => const DriverReceivablesScreen(),
       ),
       GoRoute(
+        path: AppRoutes.driverOnboarding,
+        builder: (context, state) => const DriverOnboardingScreen(),
+      ),
+      GoRoute(
+        path: AppRoutes.driverOnboardingLicense,
+        builder: (context, state) => const DriverLicenseFormScreen(),
+      ),
+      GoRoute(
+        path: AppRoutes.driverOnboardingVehicle,
+        builder: (context, state) => const DriverVehicleFormScreen(),
+      ),
+      GoRoute(
         path: AppRoutes.unsupportedRole,
         builder: (context, state) => const UnsupportedRoleScreen(),
       ),
@@ -141,6 +156,9 @@ String? _redirect(Ref ref, String currentPath) {
       final isAllowedDriverPath =
           currentPath == AppRoutes.homeDriver ||
           currentPath == AppRoutes.driverReceivables ||
+          currentPath == AppRoutes.driverOnboarding ||
+          currentPath == AppRoutes.driverOnboardingLicense ||
+          currentPath == AppRoutes.driverOnboardingVehicle ||
           currentPath == AppRoutes.profile;
       return isAllowedDriverPath ? null : AppRoutes.homeDriver;
 

@@ -8,7 +8,8 @@ import '../theme/app_typography.dart';
 /// Badge de status genérico (pílula colorida com texto), usado para exibir
 /// os enums de status da API (`docs/FRONTEND_GUIDE.md#enums-de-status`) de
 /// forma visual e consistente. Sempre construir via um dos factories
-/// nomeados (`StatusBadge.driverStatus`, `.driverApprovalStatus`) para
+/// nomeados (`StatusBadge.driverStatus`, `.driverOnboardingStatus`,
+/// `.driverEligibilityStatus`) para
 /// garantir que o mapeamento de cor/label fique centralizado num único
 /// lugar, em vez de espalhado pelas telas.
 class StatusBadge extends StatelessWidget {
@@ -35,20 +36,50 @@ class StatusBadge extends StatelessWidget {
     }
   }
 
-  /// Mapeia `Driver.approvalStatus` (`PendingApproval | Approved | Rejected`).
-  factory StatusBadge.driverApprovalStatus(String status) {
+  /// Mapeia `Driver.onboardingStatus` (`PendingDocuments | UnderReview |
+  /// Approved | Rejected` — `docs/DRIVER_ONBOARDING.md`).
+  factory StatusBadge.driverOnboardingStatus(String status) {
     switch (status) {
       case 'Approved':
         return StatusBadge(label: 'Aprovado', color: AppColors.statusAvailable);
       case 'Rejected':
         return StatusBadge(
-          label: 'Cadastro rejeitado',
+          label: 'Não aprovado',
           color: AppColors.statusBlocked,
         );
-      case 'PendingApproval':
+      case 'UnderReview':
+        return StatusBadge(label: 'Em análise', color: AppColors.statusPending);
+      case 'PendingDocuments':
       default:
         return StatusBadge(
-          label: 'Aguardando aprovação',
+          label: 'Documentação pendente',
+          color: AppColors.statusPending,
+        );
+    }
+  }
+
+  /// Mapeia `Driver.eligibilityStatus` (`Eligible | PendingDocuments |
+  /// UnderReview | Rejected | Blocked | DocumentExpired` — computado, ver
+  /// `docs/DRIVER_ONBOARDING.md#elegibilidade-computada-não-persistida`).
+  factory StatusBadge.driverEligibilityStatus(String status) {
+    switch (status) {
+      case 'Eligible':
+        return StatusBadge(
+          label: 'Apto a trabalhar',
+          color: AppColors.statusAvailable,
+        );
+      case 'Rejected':
+        return StatusBadge(label: 'Não aprovado', color: AppColors.statusBlocked);
+      case 'Blocked':
+        return StatusBadge(label: 'Suspenso', color: AppColors.statusBlocked);
+      case 'DocumentExpired':
+        return StatusBadge(label: 'CNH vencida', color: AppColors.statusBlocked);
+      case 'UnderReview':
+        return StatusBadge(label: 'Em análise', color: AppColors.statusPending);
+      case 'PendingDocuments':
+      default:
+        return StatusBadge(
+          label: 'Documentação pendente',
           color: AppColors.statusPending,
         );
     }

@@ -30,4 +30,9 @@ abstract class AppRoutes {
 
   // Etapa 2 — fluxo do entregador.
   static const driverReceivables = '/driver/receivables';
+
+  // Onboarding do entregador (CNH/veículo/status) — `docs/DRIVER_ONBOARDING.md`.
+  static const driverOnboarding = '/driver/onboarding';
+  static const driverOnboardingLicense = '/driver/onboarding/license';
+  static const driverOnboardingVehicle = '/driver/onboarding/vehicle';
 }

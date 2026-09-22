@@ -24,11 +24,32 @@ export function getDeliveryPricing(establishmentId: string) {
 
 export function updateDeliveryPricing(
   establishmentId: string,
-  body: DeliveryPricing,
+  body: { deliveryFee: number; deliveryRadiusKm: number },
 ) {
   return api.put<DeliveryPricing>(
     `/merchant/establishments/${establishmentId}/delivery-pricing`,
     body,
+  );
+}
+
+/**
+ * Pausa o recebimento de novos pedidos (Delivery e Pickup) — pedidos em
+ * andamento seguem normalmente. `pausedUntilUtc` omitido = pausa
+ * indefinida, só termina com `resumeEstablishment` manual.
+ */
+export function pauseEstablishment(
+  establishmentId: string,
+  body: { reason: string; pausedUntilUtc?: string | null },
+) {
+  return api.post<Establishment>(
+    `/merchant/establishments/${establishmentId}/pause`,
+    body,
+  );
+}
+
+export function resumeEstablishment(establishmentId: string) {
+  return api.post<Establishment>(
+    `/merchant/establishments/${establishmentId}/resume`,
   );
 }
 

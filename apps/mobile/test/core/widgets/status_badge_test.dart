@@ -15,20 +15,36 @@ void main() {
     expect(find.text('Disponível'), findsOneWidget);
   });
 
-  testWidgets('StatusBadge.driverApprovalStatus mapeia PendingApproval', (
+  testWidgets('StatusBadge.driverOnboardingStatus mapeia PendingDocuments', (
     tester,
   ) async {
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
           body: Center(
-            child: StatusBadge.driverApprovalStatus('PendingApproval'),
+            child: StatusBadge.driverOnboardingStatus('PendingDocuments'),
           ),
         ),
       ),
     );
 
-    expect(find.text('Aguardando aprovação'), findsOneWidget);
+    expect(find.text('Documentação pendente'), findsOneWidget);
+  });
+
+  testWidgets('StatusBadge.driverEligibilityStatus mapeia DocumentExpired', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Center(
+            child: StatusBadge.driverEligibilityStatus('DocumentExpired'),
+          ),
+        ),
+      ),
+    );
+
+    expect(find.text('CNH vencida'), findsOneWidget);
   });
 }
 

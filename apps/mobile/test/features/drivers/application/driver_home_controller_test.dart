@@ -21,8 +21,9 @@ void main() {
   late MockDriverRepository driverRepository;
 
   DriverProfile buildProfile({
-    String approvalStatus = 'Approved',
+    String onboardingStatus = 'Approved',
     String status = 'Available',
+    String eligibilityStatus = 'Eligible',
   }) {
     return DriverProfile(
       id: 'driver-1',
@@ -33,9 +34,11 @@ void main() {
       vehicleType: 'Motorcycle',
       pixKeyType: 'Cpf',
       pixKey: '12345678900',
-      approvalStatus: approvalStatus,
+      onboardingStatus: onboardingStatus,
       status: status,
-      approvedAtUtc: DateTime.utc(2026, 1, 1),
+      eligibilityStatus: eligibilityStatus,
+      reviewedAtUtc: DateTime.utc(2026, 1, 1),
+      rejectionReason: null,
     );
   }
 

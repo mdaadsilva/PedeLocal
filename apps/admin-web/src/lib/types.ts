@@ -120,10 +120,56 @@ export type Driver = {
   userId: string;
   name: string;
   cityId: string;
+  cpf: string;
   vehicleType: string;
-  approvalStatus: string;
+  pixKeyType: string;
+  pixKey: string;
+  /** `PendingDocuments | UnderReview | Approved | Rejected` */
+  onboardingStatus: string;
+  /** `Offline | Available | Busy | Blocked` */
   status: string;
-  approvedAtUtc: string | null;
+  /**
+   * `Eligible | PendingDocuments | UnderReview | Rejected | Blocked | DocumentExpired`
+   * — computado pelo backend (`DriverEligibilityService`), ver
+   * `docs/DRIVER_ONBOARDING.md`. É o que explica por que o entregador não
+   * consegue ficar online, mesmo já aprovado (ex.: CNH vencida).
+   */
+  eligibilityStatus: string;
+  reviewedAtUtc: string | null;
+  rejectionReason: string | null;
+};
+
+export type DriverLicense = {
+  registrationNumber: string;
+  category: string;
+  expiresAt: string;
+  hasEar: boolean | null;
+  documentImageUrl: string | null;
+  daysUntilExpiration: number;
+};
+
+export type DriverVehicle = {
+  type: string;
+  plate: string | null;
+  model: string;
+  color: string;
+  documentImageUrl: string | null;
+};
+
+export type DriverDetail = {
+  driver: Driver;
+  license: DriverLicense | null;
+  vehicle: DriverVehicle | null;
+};
+
+export type DeliveryOccurrence = {
+  id: string;
+  deliveryId: string;
+  driverId: string;
+  /** `CustomerNotFound | CustomerNotResponding | WrongAddress | PaymentProblem | VehicleProblem | Other` */
+  type: string;
+  note: string | null;
+  createdAtUtc: string;
 };
 
 export type OrderItem = {

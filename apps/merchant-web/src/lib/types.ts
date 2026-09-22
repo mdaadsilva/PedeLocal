@@ -35,6 +35,10 @@ export type Establishment = {
   operationalStatus: string;
   commercialStatus: string;
   createdAtUtc: string;
+  /** `HighDemand | NoDriverAvailable | TemporaryClosure | Other`, `null` quando não pausado. */
+  pauseReason: string | null;
+  pausedAtUtc: string | null;
+  pausedUntilUtc: string | null;
 };
 
 export type MenuCategory = {
@@ -119,17 +123,24 @@ export type InventoryMovement = {
   createdAtUtc: string;
 };
 
+/**
+ * Espelha `DeliveryPricingResponse` — taxa fixa (não há mais modo por
+ * km/misto nem distinção urbano/rural, ver `docs/ORDER_FLOW.md`).
+ */
 export type DeliveryPricing = {
   establishmentId: string;
-  urbanMode: string;
-  urbanFixedFee: number;
-  urbanPricePerKm: number;
-  urbanMinFee: number;
-  ruralMode: string;
-  ruralFixedFee: number;
-  ruralPricePerKm: number;
-  ruralMinFee: number;
-  maxDistanceKm: number;
+  deliveryFee: number;
+  deliveryRadiusKm: number;
+};
+
+export type DeliveryOccurrence = {
+  id: string;
+  deliveryId: string;
+  driverId: string;
+  /** `CustomerNotFound | CustomerNotResponding | WrongAddress | PaymentProblem | VehicleProblem | Other` */
+  type: string;
+  note: string | null;
+  createdAtUtc: string;
 };
 
 export type DriverReceivable = {
