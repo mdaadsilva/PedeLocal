@@ -49,21 +49,22 @@ class RegisterDriverResult {
   const RegisterDriverResult({
     required this.userId,
     required this.driverId,
-    required this.approvalStatus,
+    required this.onboardingStatus,
   });
 
   final String userId;
   final String driverId;
 
-  /// `PendingApproval | Approved | Rejected` — recém-cadastrado sempre nasce
-  /// `PendingApproval` (`docs/AUTH_FLOW.md`).
-  final String approvalStatus;
+  /// `PendingDocuments | UnderReview | Approved | Rejected` — recém-cadastrado
+  /// sempre nasce `PendingDocuments`, antes de enviar CNH e veículo
+  /// (`docs/DRIVER_ONBOARDING.md`).
+  final String onboardingStatus;
 
   factory RegisterDriverResult.fromJson(Map<String, dynamic> json) {
     return RegisterDriverResult(
       userId: json['userId'] as String,
       driverId: json['driverId'] as String,
-      approvalStatus: json['approvalStatus'] as String,
+      onboardingStatus: json['onboardingStatus'] as String,
     );
   }
 }

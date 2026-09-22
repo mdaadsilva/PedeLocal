@@ -15,6 +15,7 @@ import '../../application/delivery_details_controller.dart';
 import '../../domain/delivery.dart';
 import '../../domain/delivery_detail.dart';
 import 'delivery_tile.dart';
+import 'occurrence_form_sheet.dart';
 
 /// Card da entrega ativa (`status == BUSY`).
 ///
@@ -32,6 +33,7 @@ class CurrentDeliveryCard extends ConsumerStatefulWidget {
     required this.onPickup,
     required this.onOutForDelivery,
     required this.onConfirm,
+    required this.onReportOccurrence,
   });
 
   final Delivery delivery;
@@ -39,6 +41,9 @@ class CurrentDeliveryCard extends ConsumerStatefulWidget {
   final VoidCallback onPickup;
   final VoidCallback onOutForDelivery;
   final ValueChanged<String> onConfirm;
+
+  /// `(type, note)` — `docs/DELIVERY_FLOW.md#ocorrências-na-entrega`.
+  final void Function(String type, String? note) onReportOccurrence;
 
   @override
   ConsumerState<CurrentDeliveryCard> createState() =>
@@ -149,9 +154,22 @@ class _CurrentDeliveryCardState extends ConsumerState<CurrentDeliveryCard> {
             },
           ),
           ..._buildAction(),
+          const SizedBox(height: AppSpacing.sm),
+          PedeLocalButton(
+            label: 'Registrar ocorrência',
+            icon: Icons.report_problem_outlined,
+            variant: PedeLocalButtonVariant.text,
+            onPressed: widget.isProcessing ? null : _reportOccurrence,
+          ),
         ],
       ),
     );
+  }
+
+  Future<void> _reportOccurrence() async {
+    final result = await showOccurrenceFormSheet(context);
+    if (result == null) return;
+    widget.onReportOccurrence(result.$1, result.$2);
   }
 
   List<Widget> _buildAction() {

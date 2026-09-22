@@ -351,7 +351,15 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
                         keyboardType: const TextInputType.numberWithOptions(
                           decimal: true,
                         ),
+                        onChanged: (_) => setState(() {}),
                       ),
+                      if (preview != null) ...[
+                        const SizedBox(height: AppSpacing.xs),
+                        _ChangeSummary(
+                          total: preview.total,
+                          changeForAmount: _changeForAmount,
+                        ),
+                      ],
                     ],
                   ],
                 ],
@@ -408,6 +416,65 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// "Pedido: R$ 86,00 / Você vai pagar com: R$ 100,00 / Troco: R$ 14,00" —
+/// nunca deixa o entregador ou o cliente terem que calcular de cabeça.
+class _ChangeSummary extends StatelessWidget {
+  const _ChangeSummary({required this.total, required this.changeForAmount});
+
+  final double total;
+  final double? changeForAmount;
+
+  @override
+  Widget build(BuildContext context) {
+    final amount = changeForAmount;
+    if (amount == null || amount <= 0) {
+      return const Text(
+        'Informe quanto você vai pagar em dinheiro para calcularmos o troco.',
+        style: AppTypography.caption,
+      );
+    }
+
+    final change = amount - total;
+    if (change < 0) {
+      return Text(
+        'O valor informado (${Formatters.currency(amount)}) é menor que o '
+        'total do pedido (${Formatters.currency(total)}).',
+        style: AppTypography.caption.copyWith(color: AppColors.error),
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _ChangeSummaryRow('Pedido', total),
+        _ChangeSummaryRow('Você vai pagar com', amount),
+        _ChangeSummaryRow('Troco', change, isEmphasis: true),
+      ],
+    );
+  }
+}
+
+class _ChangeSummaryRow extends StatelessWidget {
+  const _ChangeSummaryRow(this.label, this.value, {this.isEmphasis = false});
+
+  final String label;
+  final double value;
+  final bool isEmphasis;
+
+  @override
+  Widget build(BuildContext context) {
+    final style = isEmphasis
+        ? AppTypography.body.copyWith(fontWeight: FontWeight.w700)
+        : AppTypography.caption;
+    return Row(
+      children: [
+        Text('$label: ', style: style),
+        Text(Formatters.currency(value), style: style),
+      ],
     );
   }
 }
@@ -486,19 +553,6 @@ class _PreviewTotals extends StatelessWidget {
             value: fee,
             fallback: isPickup ? Formatters.currency(0) : 'A calcular',
           ),
-          if (preview?.distanceKm != null) ...[
-            const SizedBox(height: AppSpacing.xxs),
-            Row(
-              children: [
-                const Text('Distância', style: AppTypography.caption),
-                const Spacer(),
-                Text(
-                  '${preview!.distanceKm!.toStringAsFixed(1)} km',
-                  style: AppTypography.caption,
-                ),
-              ],
-            ),
-          ],
           const SizedBox(height: AppSpacing.xs),
           _TotalRow(
             label: 'Total',

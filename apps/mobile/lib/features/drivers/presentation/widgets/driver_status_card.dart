@@ -9,9 +9,9 @@ import '../../../../core/widgets/status_badge.dart';
 import '../../domain/driver_profile.dart';
 
 /// Card principal de status da Home Entregador — sempre visível no topo,
-/// mostrando nome, aprovação e situação atual, com o botão de
-/// online/offline quando permitido pelo backend
-/// (`docs/DELIVERY_FLOW.md#pré-requisitos-do-entregador`).
+/// mostrando nome, aprovação (`onboardingStatus`) e elegibilidade
+/// (`eligibilityStatus`), com o botão de online/offline só quando o backend
+/// permite (`docs/DRIVER_ONBOARDING.md#elegibilidade-computada-não-persistida`).
 class DriverStatusCard extends StatelessWidget {
   const DriverStatusCard({
     super.key,
@@ -20,6 +20,7 @@ class DriverStatusCard extends StatelessWidget {
     required this.isToggling,
     required this.onGoOnline,
     required this.onGoOffline,
+    required this.onCompleteOnboarding,
   });
 
   final DriverProfile profile;
@@ -27,6 +28,10 @@ class DriverStatusCard extends StatelessWidget {
   final bool isToggling;
   final VoidCallback onGoOnline;
   final VoidCallback onGoOffline;
+
+  /// Abre o hub de onboarding (CNH/veículo) — sempre disponível, mesmo já
+  /// aprovado, para reenviar documentos vencidos ou atualizar dados.
+  final VoidCallback onCompleteOnboarding;
 
   @override
   Widget build(BuildContext context) {
@@ -73,11 +78,13 @@ class DriverStatusCard extends StatelessWidget {
             spacing: AppSpacing.xs,
             runSpacing: AppSpacing.xs,
             children: [
-              StatusBadge.driverApprovalStatus(profile.approvalStatus),
-              if (profile.isApproved) StatusBadge.driverStatus(profile.status),
+              StatusBadge.driverOnboardingStatus(profile.onboardingStatus),
+              if (profile.isEligible) StatusBadge.driverStatus(profile.status)
+              else
+                StatusBadge.driverEligibilityStatus(profile.eligibilityStatus),
             ],
           ),
-          if (profile.isApproved && !profile.isBlocked && !profile.isBusy) ...[
+          if (profile.isEligible && !profile.isBusy) ...[
             const SizedBox(height: AppSpacing.lg),
             PedeLocalButton(
               label: profile.status == 'Available'
@@ -90,6 +97,20 @@ class DriverStatusCard extends StatelessWidget {
               onPressed: profile.status == 'Available'
                   ? onGoOffline
                   : onGoOnline,
+            ),
+          ],
+          if (!profile.isEligible) ...[
+            const SizedBox(height: AppSpacing.md),
+            Text(profile.eligibilityMessage, style: AppTypography.bodyMuted),
+            const SizedBox(height: AppSpacing.sm),
+            PedeLocalButton(
+              label:
+                  profile.eligibilityStatus == 'DocumentExpired' ||
+                      profile.eligibilityStatus == 'Rejected'
+                  ? 'Atualizar documentos'
+                  : 'Ver status do cadastro',
+              variant: PedeLocalButtonVariant.secondary,
+              onPressed: onCompleteOnboarding,
             ),
           ],
         ],

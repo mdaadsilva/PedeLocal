@@ -84,7 +84,8 @@ class _RegisterDriverScreenState extends ConsumerState<RegisterDriverScreen> {
             ..showSnackBar(
               const SnackBar(
                 content: Text(
-                  'Cadastro enviado! Faça login para acompanhar a aprovação da sua conta.',
+                  'Cadastro enviado! Faça login para enviar sua CNH e os dados '
+                  'do veículo e acompanhar a aprovação.',
                 ),
                 duration: Duration(seconds: 4),
               ),

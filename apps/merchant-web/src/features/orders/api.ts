@@ -1,6 +1,6 @@
 import { api } from "@/lib/api/client";
 import type { MerchantOrderAction } from "@/lib/order-actions";
-import type { Order, PagedResult } from "@/lib/types";
+import type { DeliveryOccurrence, Order, PagedResult } from "@/lib/types";
 
 export function listOrders(
   establishmentId: string,
@@ -18,6 +18,13 @@ export function listOrders(
 export function getOrder(establishmentId: string, orderId: string) {
   return api.get<Order>(
     `/merchant/establishments/${establishmentId}/orders/${orderId}`,
+  );
+}
+
+/** `GET .../orders/{orderId}/occurrences` — ocorrências relatadas pelo entregador na entrega. */
+export function getOrderOccurrences(establishmentId: string, orderId: string) {
+  return api.get<DeliveryOccurrence[]>(
+    `/merchant/establishments/${establishmentId}/orders/${orderId}/occurrences`,
   );
 }
 

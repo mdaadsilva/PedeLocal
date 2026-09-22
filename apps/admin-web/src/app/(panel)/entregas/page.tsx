@@ -3,19 +3,22 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { EmptyState, ErrorBox, Skeleton } from "@/components/ui/empty-state";
 import { Select } from "@/components/ui/input";
+import { Modal } from "@/components/ui/modal";
 import { Pagination } from "@/components/ui/pagination";
 import { listCities } from "@/features/cities/api";
-import { listAdminDeliveries } from "@/features/deliveries/api";
+import { getDeliveryOccurrences, listAdminDeliveries } from "@/features/deliveries/api";
 import { listAllEstablishments } from "@/features/establishments/api";
-import { DELIVERY_STATUS_LABEL, labelOf } from "@/features/orders/labels";
+import { DELIVERY_STATUS_LABEL, OCCURRENCE_TYPE_LABEL, labelOf } from "@/features/orders/labels";
 import { formatDateTime, shortId } from "@/lib/formatters";
 
 export default function DeliveriesPage() {
   const [cityId, setCityId] = useState("");
   const [status, setStatus] = useState("");
   const [page, setPage] = useState(1);
+  const [occurrencesFor, setOccurrencesFor] = useState<string | null>(null);
 
   const citiesQuery = useQuery({ queryKey: ["admin", "cities"], queryFn: listCities });
   const establishmentsQuery = useQuery({
@@ -32,6 +35,11 @@ export default function DeliveriesPage() {
         pageSize: 20,
       }),
   });
+  const occurrencesQuery = useQuery({
+    queryKey: ["admin", "deliveries", "occurrences", occurrencesFor],
+    queryFn: () => getDeliveryOccurrences(occurrencesFor!),
+    enabled: Boolean(occurrencesFor),
+  });
 
   const cityNames = new Map((citiesQuery.data ?? []).map((city) => [city.id, `${city.name}/${city.state}`]));
   const establishmentNames = new Map((establishmentsQuery.data ?? []).map((item) => [item.id, item.name]));
@@ -41,7 +49,8 @@ export default function DeliveriesPage() {
       <div>
         <h1 className="text-2xl font-semibold">Entregas</h1>
         <p className="text-sm text-slate-500">
-          GET /api/admin/deliveries?cityId=&status=. A resposta traz IDs e status, sem endereço ou rota.
+          GET /api/admin/deliveries?cityId=&status=. Status: motorista aceitou, retirou o pedido, em
+          trânsito ou concluída. Ocorrências relatadas pelo entregador ficam disponíveis por entrega.
         </p>
       </div>
 
@@ -95,6 +104,7 @@ export default function DeliveriesPage() {
                   <th className="px-4 py-3">Entregador</th>
                   <th className="px-4 py-3">Status</th>
                   <th className="px-4 py-3">Atribuída</th>
+                  <th className="px-4 py-3 text-right">Ocorrências</th>
                 </tr>
               </thead>
               <tbody>
@@ -115,6 +125,11 @@ export default function DeliveriesPage() {
                     <td className="px-4 py-3 text-slate-600">
                       {delivery.assignedAtUtc ? formatDateTime(delivery.assignedAtUtc) : "—"}
                     </td>
+                    <td className="px-4 py-3 text-right">
+                      <Button variant="ghost" onClick={() => setOccurrencesFor(delivery.id)}>
+                        Ver
+                      </Button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -127,6 +142,30 @@ export default function DeliveriesPage() {
           />
         </>
       )}
+
+      {occurrencesFor ? (
+        <Modal title={`Ocorrências — entrega #${shortId(occurrencesFor)}`} onClose={() => setOccurrencesFor(null)}>
+          {occurrencesQuery.isLoading ? (
+            <Skeleton className="h-32" />
+          ) : occurrencesQuery.error ? (
+            <ErrorBox message={occurrencesQuery.error.message} onRetry={() => occurrencesQuery.refetch()} />
+          ) : (occurrencesQuery.data?.length ?? 0) === 0 ? (
+            <EmptyState title="Nenhuma ocorrência" message="O entregador não relatou nenhum problema nesta entrega." />
+          ) : (
+            <ul className="space-y-3 text-sm">
+              {occurrencesQuery.data!.map((occurrence) => (
+                <li key={occurrence.id} className="rounded-lg border border-slate-200 p-3">
+                  <div className="flex items-center justify-between">
+                    <Badge value="Cancelled" label={labelOf(OCCURRENCE_TYPE_LABEL, occurrence.type)} />
+                    <span className="text-xs text-slate-500">{formatDateTime(occurrence.createdAtUtc)}</span>
+                  </div>
+                  {occurrence.note ? <p className="mt-2 text-slate-700">{occurrence.note}</p> : null}
+                </li>
+              ))}
+            </ul>
+          )}
+        </Modal>
+      ) : null}
     </div>
   );
 }

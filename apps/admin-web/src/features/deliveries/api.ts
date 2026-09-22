@@ -1,6 +1,6 @@
 import { api } from "@/lib/api/client";
 import { toQuery } from "@/lib/query";
-import type { Delivery, PagedResult } from "@/lib/types";
+import type { Delivery, DeliveryOccurrence, PagedResult } from "@/lib/types";
 
 export function listAdminDeliveries(params: {
   cityId?: string;
@@ -16,4 +16,9 @@ export function listAdminDeliveries(params: {
       pageSize: params.pageSize ?? 20,
     })}`,
   );
+}
+
+/** `GET /api/admin/deliveries/{id}/occurrences` — ocorrências relatadas pelo entregador. */
+export function getDeliveryOccurrences(deliveryId: string) {
+  return api.get<DeliveryOccurrence[]>(`/admin/deliveries/${deliveryId}/occurrences`);
 }

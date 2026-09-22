@@ -94,6 +94,20 @@ class ProfileScreen extends ConsumerWidget {
               ),
               const SizedBox(height: AppSpacing.sm),
             ],
+            if (session?.role == UserRole.driver) ...[
+              _ProfileAction(
+                icon: Icons.badge_outlined,
+                label: 'Meu cadastro (CNH e veículo)',
+                onTap: () => context.push(AppRoutes.driverOnboarding),
+              ),
+              const SizedBox(height: AppSpacing.sm),
+              _ProfileAction(
+                icon: Icons.receipt_long_outlined,
+                label: 'Meus recebíveis',
+                onTap: () => context.push(AppRoutes.driverReceivables),
+              ),
+              const SizedBox(height: AppSpacing.sm),
+            ],
             _ProfileAction(
               icon: Icons.logout_rounded,
               label: 'Sair da conta',

@@ -11,8 +11,8 @@ import { Modal } from "@/components/ui/modal";
 import { Textarea } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
 import { useSession } from "@/features/auth/session-context";
-import { getOrder, runOrderAction } from "@/features/orders/api";
-import { orderStatusLabel, paymentLabel } from "@/features/orders/labels";
+import { getOrder, getOrderOccurrences, runOrderAction } from "@/features/orders/api";
+import { OCCURRENCE_TYPE_LABEL, labelOf, orderStatusLabel, paymentLabel } from "@/features/orders/labels";
 import { ACTION_LABELS, merchantActionsFor, type MerchantOrderAction } from "@/lib/order-actions";
 import { formatCurrency, formatDateTime, shortId } from "@/lib/formatters";
 import { ApiError } from "@/lib/api/errors";
@@ -24,11 +24,18 @@ export default function OrderDetailPage() {
   const queryClient = useQueryClient();
   const [cancelOpen, setCancelOpen] = useState(false);
   const [reason, setReason] = useState("");
+  const [occurrencesOpen, setOccurrencesOpen] = useState(false);
 
   const query = useQuery({
     queryKey: ["order", establishment?.id, params.id],
     enabled: Boolean(establishment?.id && params.id),
     queryFn: () => getOrder(establishment!.id, params.id),
+  });
+
+  const occurrencesQuery = useQuery({
+    queryKey: ["order", establishment?.id, params.id, "occurrences"],
+    enabled: Boolean(establishment?.id && params.id && occurrencesOpen),
+    queryFn: () => getOrderOccurrences(establishment!.id, params.id),
   });
 
   const mutation = useMutation({
@@ -102,7 +109,12 @@ export default function OrderDetailPage() {
             {order.changeForAmount ? <p>Troco para {formatCurrency(order.changeForAmount)}</p> : null}
             {order.notes ? <p>Obs.: {order.notes}</p> : null}
             {order.type === "Delivery" ? (
-              <p>Endereço: {order.addressId ? `#${shortId(order.addressId)}` : "não informado"}</p>
+              <>
+                <p>Endereço: {order.addressId ? `#${shortId(order.addressId)}` : "não informado"}</p>
+                <Button variant="ghost" onClick={() => setOccurrencesOpen(true)}>
+                  Ver ocorrências relatadas pelo entregador
+                </Button>
+              </>
             ) : (
               <p>Retirada no estabelecimento. Sem entregador.</p>
             )}
@@ -170,6 +182,30 @@ export default function OrderDetailPage() {
               Confirmar cancelamento
             </Button>
           </div>
+        </Modal>
+      ) : null}
+
+      {occurrencesOpen ? (
+        <Modal title="Ocorrências da entrega" onClose={() => setOccurrencesOpen(false)}>
+          {occurrencesQuery.isLoading ? (
+            <Skeleton className="h-32" />
+          ) : occurrencesQuery.error ? (
+            <ErrorBox message={occurrencesQuery.error.message} onRetry={() => occurrencesQuery.refetch()} />
+          ) : (occurrencesQuery.data?.length ?? 0) === 0 ? (
+            <p className="text-sm text-slate-500">O entregador não relatou nenhum problema nesta entrega.</p>
+          ) : (
+            <ul className="space-y-3 text-sm">
+              {occurrencesQuery.data!.map((occurrence) => (
+                <li key={occurrence.id} className="rounded-lg border border-slate-200 p-3">
+                  <div className="flex items-center justify-between">
+                    <span className="font-medium">{labelOf(OCCURRENCE_TYPE_LABEL, occurrence.type)}</span>
+                    <span className="text-xs text-slate-500">{formatDateTime(occurrence.createdAtUtc)}</span>
+                  </div>
+                  {occurrence.note ? <p className="mt-2 text-slate-700">{occurrence.note}</p> : null}
+                </li>
+              ))}
+            </ul>
+          )}
         </Modal>
       ) : null}
     </div>

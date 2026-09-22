@@ -46,24 +46,56 @@ export const SUBSCRIPTION_STATUS_LABEL: Record<string, string> = {
   SuspendedPayment: "Bloqueada",
 };
 
-export const DRIVER_APPROVAL_LABEL: Record<string, string> = {
-  PendingApproval: "Pendente",
+export const DRIVER_ONBOARDING_LABEL: Record<string, string> = {
+  PendingDocuments: "Documentação pendente",
+  UnderReview: "Em análise",
   Approved: "Aprovado",
-  Rejected: "Recusado",
+  Rejected: "Reprovado",
+};
+
+export const DRIVER_ELIGIBILITY_LABEL: Record<string, string> = {
+  Eligible: "Apto a trabalhar",
+  PendingDocuments: "Documentação pendente",
+  UnderReview: "Em análise",
+  Rejected: "Reprovado",
+  Blocked: "Suspenso",
+  DocumentExpired: "CNH vencida",
 };
 
 export const DRIVER_STATUS_LABEL: Record<string, string> = {
   Offline: "Offline",
   Available: "Disponível",
   Busy: "Ocupado",
-  Blocked: "Bloqueado",
+  Blocked: "Suspenso",
+};
+
+export const VEHICLE_TYPE_LABEL: Record<string, string> = {
+  Bike: "Bicicleta",
+  Motorcycle: "Moto",
+  Car: "Carro",
+};
+
+export const PIX_KEY_TYPE_LABEL: Record<string, string> = {
+  Cpf: "CPF",
+  Email: "E-mail",
+  Phone: "Telefone",
+  Random: "Aleatória",
+};
+
+export const OCCURRENCE_TYPE_LABEL: Record<string, string> = {
+  CustomerNotFound: "Cliente não encontrado",
+  CustomerNotResponding: "Cliente não responde",
+  WrongAddress: "Endereço incorreto",
+  PaymentProblem: "Problema de pagamento",
+  VehicleProblem: "Problema no veículo",
+  Other: "Outro",
 };
 
 export const DELIVERY_STATUS_LABEL: Record<string, string> = {
   Available: "Disponível",
-  Assigned: "Atribuída",
-  PickedUp: "Retirada",
-  OutForDelivery: "Em rota",
+  Assigned: "Motorista aceitou",
+  PickedUp: "Motorista retirou o pedido",
+  OutForDelivery: "Em trânsito",
   Completed: "Concluída",
   Cancelled: "Cancelada",
 };
