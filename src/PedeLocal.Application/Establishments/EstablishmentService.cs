@@ -11,7 +11,7 @@ using PedeLocal.Domain.Identity;
 
 namespace PedeLocal.Application.Establishments;
 
-public class EstablishmentService(IAppDbContext db, IPasswordHasher passwordHasher)
+public class EstablishmentService(IAppDbContext db, IPasswordHasher passwordHasher, EstablishmentAccessGuard accessGuard)
 {
     public async Task<List<EstablishmentCategoryResponse>> GetCategoriesAsync(CancellationToken ct) =>
         await db.EstablishmentCategories
@@ -186,6 +186,65 @@ public class EstablishmentService(IAppDbContext db, IPasswordHasher passwordHash
         return ToResponse(establishment);
     }
 
+    /// <summary>Merchant self-service pause — blocks every new order (DELIVERY and PICKUP alike, see
+    /// OrderService.BuildQuoteAsync) until resumed, either manually or automatically once
+    /// PausedUntilUtc passes (EstablishmentPauseExpiryJob, plus the lazy check in
+    /// Establishment.IsOperationallyOpen so a timed-out pause never blocks an order even before the
+    /// job runs).</summary>
+    public async Task<EstablishmentResponse> PauseAsync(Guid id, PauseEstablishmentRequest request, Guid? actorUserId, CancellationToken ct)
+    {
+        await accessGuard.EnsureAccessAsync(id, ct);
+        var establishment = await GetOrThrowAsync(id, ct);
+
+        if (!Enum.TryParse<EstablishmentPauseReason>(request.Reason, ignoreCase: true, out var reason))
+        {
+            throw new AppException("INVALID_PAUSE_REASON", "Motivo de pausa inválido.");
+        }
+        if (request.PausedUntilUtc is { } until && until <= DateTime.UtcNow)
+        {
+            throw new AppException("INVALID_PAUSE_UNTIL", "A data de término da pausa deve ser no futuro.");
+        }
+
+        establishment.OperationalStatus = OperationalStatus.Paused;
+        establishment.PauseReason = reason;
+        establishment.PausedAtUtc = DateTime.UtcNow;
+        establishment.PausedUntilUtc = request.PausedUntilUtc;
+        establishment.PausedByUserId = actorUserId;
+
+        db.AuditLogs.Add(new Domain.Audit.AuditLog
+        {
+            ActorUserId = actorUserId, Action = Domain.Audit.AuditActions.EstablishmentPaused,
+            EntityType = nameof(Establishment), EntityId = establishment.Id,
+            MetadataJson = System.Text.Json.JsonSerializer.Serialize(new { reason = reason.ToString(), until = request.PausedUntilUtc })
+        });
+        await db.SaveChangesAsync(ct);
+        return ToResponse(establishment);
+    }
+
+    public async Task<EstablishmentResponse> ResumeAsync(Guid id, Guid? actorUserId, CancellationToken ct)
+    {
+        await accessGuard.EnsureAccessAsync(id, ct);
+        var establishment = await GetOrThrowAsync(id, ct);
+
+        if (establishment.OperationalStatus == OperationalStatus.Paused)
+        {
+            establishment.OperationalStatus = OperationalStatus.Open;
+            establishment.PauseReason = null;
+            establishment.PausedAtUtc = null;
+            establishment.PausedUntilUtc = null;
+            establishment.PausedByUserId = null;
+
+            db.AuditLogs.Add(new Domain.Audit.AuditLog
+            {
+                ActorUserId = actorUserId, Action = Domain.Audit.AuditActions.EstablishmentResumed,
+                EntityType = nameof(Establishment), EntityId = establishment.Id
+            });
+            await db.SaveChangesAsync(ct);
+        }
+
+        return ToResponse(establishment);
+    }
+
     private async Task<string> GenerateUniqueSlugAsync(string name, CancellationToken ct)
     {
         var baseSlug = SlugGenerator.Slugify(name);
@@ -204,5 +263,6 @@ public class EstablishmentService(IAppDbContext db, IPasswordHasher passwordHash
 
     private static EstablishmentResponse ToResponse(Establishment e) => new(
         e.Id, e.CityId, e.Name, e.Slug, e.Document, e.Phone, e.Email, e.CategoryId, e.AddressId,
-        e.OperationalStatus.ToString(), e.CommercialStatus.ToString(), e.CreatedAtUtc);
+        e.OperationalStatus.ToString(), e.CommercialStatus.ToString(), e.CreatedAtUtc,
+        e.PauseReason?.ToString(), e.PausedAtUtc, e.PausedUntilUtc);
 }

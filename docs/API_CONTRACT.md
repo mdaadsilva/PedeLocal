@@ -69,7 +69,8 @@ Convenções gerais, enums e o formato de erro padrão estão em
 | PATCH | `/products/{productId}/availability` |
 | POST | `/products/{productId}/inventory/adjust` |
 | GET | `/products/{productId}/inventory/movements` |
-| GET/PUT | `/delivery-pricing` |
+| GET/PUT | `/delivery-pricing` (taxa fixa `deliveryFee` + `deliveryRadiusKm`) |
+| POST | `/pause` \| `/resume` |
 
 ## Pedidos
 
@@ -84,15 +85,19 @@ Convenções gerais, enums e o formato de erro padrão estão em
 | GET | `/api/merchant/establishments/{id}/orders/{orderId}` | staff |
 | POST | `.../orders/{orderId}/accept` \| `/preparing` \| `/ready` \| `/cancel` | staff |
 | POST | `.../orders/{orderId}/complete-pickup` | staff — só `orderType = Pickup` |
+| GET | `.../orders/{orderId}/occurrences` | staff |
 | GET | `/api/admin/orders?establishmentId=&status=` | SUPER_ADMIN |
 
-## Entregadores
+## Entregadores — ver `docs/DRIVER_ONBOARDING.md`
 
 | Método | Rota | Quem |
 |---|---|---|
 | GET | `/api/driver/me` | DRIVER |
+| GET | `/api/driver/me/documents` | DRIVER |
+| PUT | `/api/driver/me/documents/license` \| `/vehicle` | DRIVER |
 | POST | `/api/driver/me/status/online` \| `/offline` | DRIVER |
-| GET | `/api/admin/drivers?approvalStatus=` | SUPER_ADMIN |
+| GET | `/api/admin/drivers?onboardingStatus=` | SUPER_ADMIN |
+| GET | `/api/admin/drivers/{id}` | SUPER_ADMIN — detalhes + CNH + veículo |
 | POST | `/api/admin/drivers/{id}/approve` \| `/reject` \| `/block` \| `/unblock` | SUPER_ADMIN |
 
 ## Entregas
@@ -103,7 +108,9 @@ Convenções gerais, enums e o formato de erro padrão estão em
 | GET | `/api/driver/deliveries/current` | DRIVER |
 | GET | `/api/driver/deliveries/{id}/details` | DRIVER — só o entregador vinculado à entrega |
 | POST | `/api/driver/deliveries/{id}/accept` \| `/pickup` \| `/out-for-delivery` \| `/confirm` | DRIVER |
+| POST/GET | `/api/driver/deliveries/{id}/occurrences` | DRIVER — só o entregador vinculado à entrega |
 | GET | `/api/admin/deliveries?cityId=&status=` | SUPER_ADMIN |
+| GET | `/api/admin/deliveries/{id}/occurrences` | SUPER_ADMIN |
 
 ## Financeiro (repasse a entregadores)
 

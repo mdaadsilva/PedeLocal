@@ -23,16 +23,8 @@ public class DeliveryPricingSettingsConfiguration : IEntityTypeConfiguration<Del
     {
         builder.ToTable("delivery_pricing_settings");
         builder.HasKey(s => s.EstablishmentId);
-        builder.Property(s => s.UrbanMode).HasConversion<string>().HasMaxLength(16);
-        builder.Property(s => s.RuralMode).HasConversion<string>().HasMaxLength(16);
 
-        foreach (var name in new[]
-                 {
-                     nameof(DeliveryPricingSettings.UrbanFixedFee), nameof(DeliveryPricingSettings.UrbanPricePerKm),
-                     nameof(DeliveryPricingSettings.UrbanMinFee), nameof(DeliveryPricingSettings.RuralFixedFee),
-                     nameof(DeliveryPricingSettings.RuralPricePerKm), nameof(DeliveryPricingSettings.RuralMinFee),
-                     nameof(DeliveryPricingSettings.MaxDistanceKm)
-                 })
+        foreach (var name in new[] { nameof(DeliveryPricingSettings.DeliveryFee), nameof(DeliveryPricingSettings.DeliveryRadiusKm) })
         {
             builder.Property(name).HasColumnType("numeric(12,2)");
         }

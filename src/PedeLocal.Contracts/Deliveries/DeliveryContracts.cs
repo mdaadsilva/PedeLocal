@@ -46,3 +46,13 @@ public record DeliveryDetailResponse(
     DeliveryDetailOrderResponse Order,
     DeliveryDetailEstablishmentResponse Establishment,
     AddressResponse DeliveryAddress);
+
+public record CreateDeliveryOccurrenceRequest(string Type, string? Note);
+
+public record DeliveryOccurrenceResponse(
+    Guid Id,
+    Guid DeliveryId,
+    Guid DriverId,
+    string Type,
+    string? Note,
+    DateTime CreatedAtUtc);

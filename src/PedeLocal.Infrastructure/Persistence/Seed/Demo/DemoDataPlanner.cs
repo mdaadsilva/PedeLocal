@@ -59,6 +59,8 @@ public static partial class DemoDataPlanner
         public readonly List<ProductOption> ProductOptions = [];
         public readonly List<InventoryMovement> InventoryMovements = [];
         public readonly List<Driver> Drivers = [];
+        public readonly List<DriverLicense> DriverLicenses = [];
+        public readonly List<DriverVehicle> DriverVehicles = [];
         public readonly List<Order> Orders = [];
         public readonly List<OrderItem> OrderItems = [];
         public readonly List<OrderItemOption> OrderItemOptions = [];
@@ -180,6 +182,8 @@ public static partial class DemoDataPlanner
             ProductOptions = ctx.ProductOptions,
             InventoryMovements = ctx.InventoryMovements,
             Drivers = ctx.Drivers,
+            DriverLicenses = ctx.DriverLicenses,
+            DriverVehicles = ctx.DriverVehicles,
             Orders = ctx.Orders,
             OrderItems = ctx.OrderItems,
             OrderItemOptions = ctx.OrderItemOptions,

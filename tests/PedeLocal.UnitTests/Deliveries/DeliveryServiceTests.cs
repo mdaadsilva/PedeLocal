@@ -1,6 +1,9 @@
 using Microsoft.EntityFrameworkCore;
+using PedeLocal.Application.Common;
 using PedeLocal.Application.Common.Exceptions;
+using PedeLocal.Application.Common.Interfaces;
 using PedeLocal.Application.Deliveries;
+using PedeLocal.Application.Identity;
 using PedeLocal.Application.Orders;
 using PedeLocal.Contracts.Deliveries;
 using PedeLocal.Contracts.Orders;
@@ -17,14 +20,24 @@ namespace PedeLocal.UnitTests.Deliveries;
 
 public class DeliveryServiceTests
 {
+    private static DeliveryService CreateSut(
+        PedeLocalDbContext db, Guid userId, ITokenService? tokenService = null,
+        IRealtimeNotifier? realtime = null, INotificationService? notifications = null)
+    {
+        var currentUser = new FakeCurrentUserService(userId);
+        return new DeliveryService(
+            db, currentUser, tokenService ?? TestTokenService.Create(), realtime ?? new NoOpRealtimeNotifier(),
+            notifications ?? new NoOpNotificationService(), new EstablishmentAccessGuard(db, currentUser));
+    }
+
     private static async Task<(OrderTestFixture Fx, Guid DeliveryId, Guid OrderId)> SeedReadyDeliveryAsync()
     {
         var fx = await OrderTestFixture.CreateAsync();
         var customerUser = new FakeCurrentUserService(fx.CustomerUserId);
         var staffUser = new FakeCurrentUserService(fx.StaffUserId);
-        var orderService = new OrderService(fx.Db, customerUser, new PedeLocal.Application.Common.EstablishmentAccessGuard(fx.Db, customerUser),
+        var orderService = new OrderService(fx.Db, customerUser, new EstablishmentAccessGuard(fx.Db, customerUser),
             new HaversineDistanceService(), TestTokenService.Create(), TestDeliveryCodeCipher.Create(), new NoOpRealtimeNotifier(), new NoOpNotificationService());
-        var staffOrderService = new OrderService(fx.Db, staffUser, new PedeLocal.Application.Common.EstablishmentAccessGuard(fx.Db, staffUser),
+        var staffOrderService = new OrderService(fx.Db, staffUser, new EstablishmentAccessGuard(fx.Db, staffUser),
             new HaversineDistanceService(), TestTokenService.Create(), TestDeliveryCodeCipher.Create(), new NoOpRealtimeNotifier(), new NoOpNotificationService());
 
         var order = await orderService.CreateAsync(
@@ -40,15 +53,26 @@ public class DeliveryServiceTests
         return (fx, delivery.Id, order.Id);
     }
 
-    private static async Task<Guid> SeedDriverAsync(PedeLocalDbContext db, Guid cityId, DriverStatus status = DriverStatus.Available)
+    private static async Task<Guid> SeedDriverAsync(
+        PedeLocalDbContext db, Guid cityId, DriverStatus status = DriverStatus.Available,
+        DriverOnboardingStatus onboardingStatus = DriverOnboardingStatus.Approved, bool withValidLicense = true)
     {
         var userId = Guid.NewGuid();
+        var driverId = Guid.NewGuid();
         db.Users.Add(new Domain.Identity.User { Id = userId, Name = "Entregador", Email = $"{userId}@example.com", PhoneNumber = "1", PasswordHash = "x" });
         db.Drivers.Add(new Domain.Drivers.Driver
         {
-            UserId = userId, CityId = cityId, Cpf = Guid.NewGuid().ToString("N")[..11], VehicleType = VehicleType.Motorcycle,
-            PixKeyType = PixKeyType.Cpf, PixKey = "x", ApprovalStatus = DriverApprovalStatus.Approved, Status = status
+            Id = driverId, UserId = userId, CityId = cityId, Cpf = Guid.NewGuid().ToString("N")[..11], VehicleType = VehicleType.Motorcycle,
+            PixKeyType = PixKeyType.Cpf, PixKey = "x", OnboardingStatus = onboardingStatus, Status = status
         });
+        if (withValidLicense)
+        {
+            db.DriverLicenses.Add(new DriverLicense
+            {
+                DriverId = driverId, RegistrationNumber = Guid.NewGuid().ToString("N")[..11], Category = "A",
+                ExpiresAt = DateOnly.FromDateTime(DateTime.UtcNow.AddYears(1))
+            });
+        }
         await db.SaveChangesAsync();
         return userId;
     }
@@ -58,13 +82,42 @@ public class DeliveryServiceTests
     {
         var (fx, deliveryId, _) = await SeedReadyDeliveryAsync();
         var driverUserId = await SeedDriverAsync(fx.Db, fx.City.Id);
-        var sut = new DeliveryService(fx.Db, new FakeCurrentUserService(driverUserId), TestTokenService.Create(), new NoOpRealtimeNotifier(), new NoOpNotificationService());
+        var sut = CreateSut(fx.Db, driverUserId);
 
         var response = await sut.AcceptAsync(deliveryId, CancellationToken.None);
 
         Assert.Equal("Assigned", response.Status);
         var driver = fx.Db.Drivers.Single(d => d.UserId == driverUserId);
         Assert.Equal(DriverStatus.Busy, driver.Status);
+    }
+
+    [Fact]
+    public async Task Accept_ByDriverNotApproved_Throws()
+    {
+        var (fx, deliveryId, _) = await SeedReadyDeliveryAsync();
+        var driverUserId = await SeedDriverAsync(fx.Db, fx.City.Id, onboardingStatus: DriverOnboardingStatus.UnderReview);
+        var sut = CreateSut(fx.Db, driverUserId);
+
+        var ex = await Assert.ThrowsAsync<ForbiddenException>(() => sut.AcceptAsync(deliveryId, CancellationToken.None));
+        Assert.Equal("DRIVER_NOT_APPROVED", ex.Code);
+    }
+
+    [Fact]
+    public async Task Accept_ByDriverWithExpiredLicense_Throws()
+    {
+        var (fx, deliveryId, _) = await SeedReadyDeliveryAsync();
+        var driverUserId = await SeedDriverAsync(fx.Db, fx.City.Id, withValidLicense: false);
+        var driverId = fx.Db.Drivers.Single(d => d.UserId == driverUserId).Id;
+        fx.Db.DriverLicenses.Add(new DriverLicense
+        {
+            DriverId = driverId, RegistrationNumber = "1", Category = "A",
+            ExpiresAt = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(-1))
+        });
+        await fx.Db.SaveChangesAsync();
+        var sut = CreateSut(fx.Db, driverUserId);
+
+        var ex = await Assert.ThrowsAsync<ForbiddenException>(() => sut.AcceptAsync(deliveryId, CancellationToken.None));
+        Assert.Equal("DRIVER_DOCUMENT_EXPIRED", ex.Code);
     }
 
     [Fact]
@@ -82,8 +135,8 @@ public class DeliveryServiceTests
         // Both "requests" read the delivery before either one writes.
         var deliveryTrackedByB = await dbB.Deliveries.SingleAsync(d => d.Id == deliveryId);
 
-        var sutA = new DeliveryService(dbA, new FakeCurrentUserService(driverAUserId), TestTokenService.Create(), new NoOpRealtimeNotifier(), new NoOpNotificationService());
-        var sutB = new DeliveryService(dbB, new FakeCurrentUserService(driverBUserId), TestTokenService.Create(), new NoOpRealtimeNotifier(), new NoOpNotificationService());
+        var sutA = CreateSut(dbA, driverAUserId);
+        var sutB = CreateSut(dbB, driverBUserId);
 
         var acceptedByA = await sutA.AcceptAsync(deliveryId, CancellationToken.None);
         Assert.Equal("Assigned", acceptedByA.Status);
@@ -108,7 +161,7 @@ public class DeliveryServiceTests
     {
         var (fx, deliveryId, _) = await SeedReadyDeliveryAsync();
         var driverUserId = await SeedDriverAsync(fx.Db, fx.City.Id, DriverStatus.Busy);
-        var sut = new DeliveryService(fx.Db, new FakeCurrentUserService(driverUserId), TestTokenService.Create(), new NoOpRealtimeNotifier(), new NoOpNotificationService());
+        var sut = CreateSut(fx.Db, driverUserId);
 
         await Assert.ThrowsAsync<ConflictException>(() => sut.AcceptAsync(deliveryId, CancellationToken.None));
     }
@@ -118,7 +171,7 @@ public class DeliveryServiceTests
     {
         var (fx, deliveryId, _) = await SeedReadyDeliveryAsync();
         var driverUserId = await SeedDriverAsync(fx.Db, fx.City.Id);
-        var sut = new DeliveryService(fx.Db, new FakeCurrentUserService(driverUserId), TestTokenService.Create(), new NoOpRealtimeNotifier(), new NoOpNotificationService());
+        var sut = CreateSut(fx.Db, driverUserId);
 
         await sut.AcceptAsync(deliveryId, CancellationToken.None);
         await sut.PickupAsync(deliveryId, CancellationToken.None);
@@ -137,7 +190,7 @@ public class DeliveryServiceTests
         var (fx, deliveryId, orderId) = await SeedReadyDeliveryAsync();
         var driverUserId = await SeedDriverAsync(fx.Db, fx.City.Id);
         var tokenService = TestTokenService.Create();
-        var sut = new DeliveryService(fx.Db, new FakeCurrentUserService(driverUserId), tokenService, new NoOpRealtimeNotifier(), new NoOpNotificationService());
+        var sut = CreateSut(fx.Db, driverUserId, tokenService);
 
         await sut.AcceptAsync(deliveryId, CancellationToken.None);
         await sut.PickupAsync(deliveryId, CancellationToken.None);
@@ -172,10 +225,10 @@ public class DeliveryServiceTests
         var driverAUserId = await SeedDriverAsync(fx.Db, fx.City.Id);
         var driverBUserId = await SeedDriverAsync(fx.Db, fx.City.Id);
 
-        var sutA = new DeliveryService(fx.Db, new FakeCurrentUserService(driverAUserId), TestTokenService.Create(), new NoOpRealtimeNotifier(), new NoOpNotificationService());
+        var sutA = CreateSut(fx.Db, driverAUserId);
         await sutA.AcceptAsync(deliveryId, CancellationToken.None);
 
-        var sutB = new DeliveryService(fx.Db, new FakeCurrentUserService(driverBUserId), TestTokenService.Create(), new NoOpRealtimeNotifier(), new NoOpNotificationService());
+        var sutB = CreateSut(fx.Db, driverBUserId);
         await Assert.ThrowsAsync<ForbiddenException>(() => sutB.PickupAsync(deliveryId, CancellationToken.None));
     }
 
@@ -184,7 +237,7 @@ public class DeliveryServiceTests
     {
         var (fx, deliveryId, orderId) = await SeedReadyDeliveryAsync();
         var driverUserId = await SeedDriverAsync(fx.Db, fx.City.Id);
-        var sut = new DeliveryService(fx.Db, new FakeCurrentUserService(driverUserId), TestTokenService.Create(), new NoOpRealtimeNotifier(), new NoOpNotificationService());
+        var sut = CreateSut(fx.Db, driverUserId);
         await sut.AcceptAsync(deliveryId, CancellationToken.None);
 
         var details = await sut.GetDetailsAsync(deliveryId, CancellationToken.None);
@@ -202,10 +255,10 @@ public class DeliveryServiceTests
         var driverAUserId = await SeedDriverAsync(fx.Db, fx.City.Id);
         var driverBUserId = await SeedDriverAsync(fx.Db, fx.City.Id);
 
-        var sutA = new DeliveryService(fx.Db, new FakeCurrentUserService(driverAUserId), TestTokenService.Create(), new NoOpRealtimeNotifier(), new NoOpNotificationService());
+        var sutA = CreateSut(fx.Db, driverAUserId);
         await sutA.AcceptAsync(deliveryId, CancellationToken.None);
 
-        var sutB = new DeliveryService(fx.Db, new FakeCurrentUserService(driverBUserId), TestTokenService.Create(), new NoOpRealtimeNotifier(), new NoOpNotificationService());
+        var sutB = CreateSut(fx.Db, driverBUserId);
         await Assert.ThrowsAsync<ForbiddenException>(() => sutB.GetDetailsAsync(deliveryId, CancellationToken.None));
     }
 
@@ -215,7 +268,7 @@ public class DeliveryServiceTests
         var (fx, deliveryId, orderId) = await SeedReadyDeliveryAsync();
         var driverUserId = await SeedDriverAsync(fx.Db, fx.City.Id);
         var tokenService = TestTokenService.Create();
-        var sut = new DeliveryService(fx.Db, new FakeCurrentUserService(driverUserId), tokenService, new NoOpRealtimeNotifier(), new NoOpNotificationService());
+        var sut = CreateSut(fx.Db, driverUserId, tokenService);
 
         await sut.AcceptAsync(deliveryId, CancellationToken.None);
         await sut.PickupAsync(deliveryId, CancellationToken.None);
@@ -228,11 +281,73 @@ public class DeliveryServiceTests
 
         await sut.ConfirmAsync(deliveryId, new ConfirmDeliveryRequest(knownCode), CancellationToken.None);
 
-        var orderService = new PedeLocal.Application.Orders.OrderService(
-            fx.Db, new FakeCurrentUserService(fx.CustomerUserId), new PedeLocal.Application.Common.EstablishmentAccessGuard(fx.Db, new FakeCurrentUserService(fx.CustomerUserId)),
+        var customerUser = new FakeCurrentUserService(fx.CustomerUserId);
+        var orderService = new OrderService(
+            fx.Db, customerUser, new EstablishmentAccessGuard(fx.Db, customerUser),
             new HaversineDistanceService(), tokenService, TestDeliveryCodeCipher.Create(), new NoOpRealtimeNotifier(), new NoOpNotificationService());
 
         await Assert.ThrowsAsync<ConflictException>(() => orderService.GetDeliveryCodeAsync(orderId, CancellationToken.None));
+    }
+
+    // ---------------------------------------------------------------
+    // Delivery occurrences (section 10)
+    // ---------------------------------------------------------------
+
+    [Fact]
+    public async Task AddOccurrence_ByAssignedDriver_Succeeds()
+    {
+        var (fx, deliveryId, _) = await SeedReadyDeliveryAsync();
+        var driverUserId = await SeedDriverAsync(fx.Db, fx.City.Id);
+        var sut = CreateSut(fx.Db, driverUserId);
+        await sut.AcceptAsync(deliveryId, CancellationToken.None);
+
+        var occurrence = await sut.AddOccurrenceAsync(deliveryId,
+            new CreateDeliveryOccurrenceRequest("CustomerNotFound", "Ninguém atendeu."), CancellationToken.None);
+
+        Assert.Equal("CustomerNotFound", occurrence.Type);
+        Assert.Equal(deliveryId, occurrence.DeliveryId);
+    }
+
+    [Fact]
+    public async Task AddOccurrence_ByUnrelatedDriver_Throws()
+    {
+        var (fx, deliveryId, _) = await SeedReadyDeliveryAsync();
+        var driverAUserId = await SeedDriverAsync(fx.Db, fx.City.Id);
+        var driverBUserId = await SeedDriverAsync(fx.Db, fx.City.Id);
+        var sutA = CreateSut(fx.Db, driverAUserId);
+        await sutA.AcceptAsync(deliveryId, CancellationToken.None);
+
+        var sutB = CreateSut(fx.Db, driverBUserId);
+        await Assert.ThrowsAsync<ForbiddenException>(() =>
+            sutB.AddOccurrenceAsync(deliveryId, new CreateDeliveryOccurrenceRequest("Other", null), CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task GetOccurrences_ByEstablishmentStaff_Succeeds()
+    {
+        var (fx, deliveryId, _) = await SeedReadyDeliveryAsync();
+        var driverUserId = await SeedDriverAsync(fx.Db, fx.City.Id);
+        var driverSut = CreateSut(fx.Db, driverUserId);
+        await driverSut.AcceptAsync(deliveryId, CancellationToken.None);
+        await driverSut.AddOccurrenceAsync(deliveryId, new CreateDeliveryOccurrenceRequest("WrongAddress", null), CancellationToken.None);
+
+        var staffSut = CreateSut(fx.Db, fx.StaffUserId);
+        var occurrences = await staffSut.GetOccurrencesAsync(deliveryId, CancellationToken.None);
+
+        Assert.Single(occurrences);
+    }
+
+    [Fact]
+    public async Task GetOccurrences_ByUnrelatedUser_Throws()
+    {
+        var (fx, deliveryId, _) = await SeedReadyDeliveryAsync();
+        var driverUserId = await SeedDriverAsync(fx.Db, fx.City.Id);
+        var driverSut = CreateSut(fx.Db, driverUserId);
+        await driverSut.AcceptAsync(deliveryId, CancellationToken.None);
+
+        var strangerSut = CreateSut(fx.Db, Guid.NewGuid());
+        var ex = await Assert.ThrowsAsync<ForbiddenException>(() => strangerSut.GetOccurrencesAsync(deliveryId, CancellationToken.None));
+        Assert.Equal("OCCURRENCE_ACCESS_DENIED", ex.Code);
     }
 
     // ---------------------------------------------------------------
@@ -245,7 +360,7 @@ public class DeliveryServiceTests
         var (fx, deliveryId, _) = await SeedReadyDeliveryAsync();
         var driverUserId = await SeedDriverAsync(fx.Db, fx.City.Id);
         var realtime = new CapturingRealtimeNotifier();
-        var sut = new DeliveryService(fx.Db, new FakeCurrentUserService(driverUserId), TestTokenService.Create(), realtime, new NoOpNotificationService());
+        var sut = CreateSut(fx.Db, driverUserId, realtime: realtime);
 
         await sut.AcceptAsync(deliveryId, CancellationToken.None);
 
@@ -261,7 +376,7 @@ public class DeliveryServiceTests
         var (fx, deliveryId, _) = await SeedReadyDeliveryAsync();
         var driverUserId = await SeedDriverAsync(fx.Db, fx.City.Id);
         var notifications = new CapturingNotificationService();
-        var sut = new DeliveryService(fx.Db, new FakeCurrentUserService(driverUserId), TestTokenService.Create(), new NoOpRealtimeNotifier(), notifications);
+        var sut = CreateSut(fx.Db, driverUserId, notifications: notifications);
 
         await sut.AcceptAsync(deliveryId, CancellationToken.None);
         await sut.PickupAsync(deliveryId, CancellationToken.None);

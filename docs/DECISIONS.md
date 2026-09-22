@@ -563,3 +563,78 @@ integração (`DeviceTokenTests` — registro sob o próprio JWT, idempotência,
 Resultado: `dotnet build` limpo, `dotnet test` com **159/159 testes
 passando** (129 unit + 30 integration). Migration aplicada e conferida
 contra Postgres real (`docker compose`), não só InMemory.
+
+## 21 — Driver operations: onboarding, taxa fixa, raio, ocorrências, pausa
+
+Onda de mudanças cobrindo: onboarding real do entregador (CNH + veículo),
+simplificação da taxa de entrega para valor fixo, raio máximo de entrega,
+confirmação de retirada, ocorrências de entrega, troco e pausa do
+estabelecimento. Ver `docs/DRIVER_ONBOARDING.md`, `docs/DELIVERY_FLOW.md` e
+`docs/ORDER_FLOW.md` para os contratos; aqui só as decisões não óbvias.
+
+**`DriverApprovalStatus` → `DriverOnboardingStatus`, sem valor `Suspended`.**
+`DriverStatus.Blocked` já existia e já tinha endpoints admin (`/block`,
+`/unblock`) — é exatamente "suspender/reativar um entregador aprovado".
+Adicionar um segundo estado de suspensão no onboarding duplicaria essa
+máquina de estados. `/block` e `/unblock` **são** as ações de
+suspender/reativar; não existem rotas novas para isso.
+
+**`DOCUMENT_EXPIRED` nunca é persistido.** É computado por
+`DriverEligibilityService.Evaluate(driver, license, now)` a partir de
+`DriverLicense.ExpiresAt`, não uma coluna. Persistir exigiria um job
+recorrente para não ficar defasado, e colidiria com a decisão real do admin
+(`OnboardingStatus.Approved`) assim que o entregador renovasse a CNH. O
+mesmo serviço unifica a checagem antes duplicada entre
+`DriverService.GoOnlineAsync` e `DeliveryService` (que checava só
+approval+blocked, sem validade de documento).
+
+**Taxa de entrega: `DeliveryFeeMode`/Urban×Rural removidos, não
+"desativados".** O negócio pediu para parar de usar preço por KM — manter o
+enum morto no schema só para "compatibilidade" seria manter uma opção que
+não deveria mais existir. Migration única (`AddDriverOperationsSchema`)
+com SQL de transformação: `DeliveryFee` recebe `UrbanFixedFee` (se o modo
+era Fixed) ou `UrbanMinFee` como aproximação (se era PerKm), com fallback
+documentado de R$7 só quando nada estava configurado; `DeliveryRadiusKm`
+herda `MaxDistanceKm` diretamente (mesmo conceito, sem mais split por
+zona). Pedidos históricos são imunes a essa mudança — `Order.DeliveryFee`/
+`PricingRuleSnapshotJson` já eram um snapshot por pedido antes disso.
+Validado com dados sintéticos "no formato antigo" contra Postgres real
+(container descartável) antes de aceitar a migration como correta — ver
+resultado no fim desta seção.
+
+**Raio de entrega mora em `DeliveryPricingSettings`, não em
+`Establishment`.** Essa tabela já tinha `MaxDistanceKm` para exatamente
+esse propósito; renomeá-lo para `DeliveryRadiusKm` evita um segundo campo
+de raio em outra tabela.
+
+**CNH: um único veredito (aprovar/reprovar) cobre CNH + veículo juntos.**
+`DriverLicense`/`DriverVehicle` guardam só os dados declarados pelo
+entregador; a decisão do SUPER_ADMIN vive inteiramente em `Driver`
+(`ReviewedAtUtc`/`ReviewedByUserId`/`RejectionReason` — generalização do
+antigo par `ApprovedAtUtc`/`ApprovedByUserId`, que agora também persiste o
+motivo de reprovação, silenciosamente descartado antes). Não existe
+integração com Senatran — a spec do produto proíbe explicitamente fingir
+essa validação automática; o fluxo é sempre humano (entregador envia →
+SUPER_ADMIN decide).
+
+**Pausa do estabelecimento reaproveita `OperationalStatus.Paused`**, que já
+bloqueava novos pedidos (`OrderService.BuildQuoteAsync`) — não foi criado
+um novo status "operacional". Novidade real: motivo (`PauseReason`),
+expiração opcional (`PausedUntilUtc`) e um job (`EstablishmentPauseExpiryJob`,
+a cada 15 min — bem mais frequente que o `SubscriptionGracePeriodJob`
+diário, porque uma pausa dura horas, não dias) que retoma automaticamente.
+A checagem em `Establishment.IsOperationallyOpen()` já trata uma pausa
+vencida como encerrada mesmo antes do job rodar, então nenhum pedido fica
+bloqueado esperando o cron.
+
+**Testes**: `dotnet build` limpo, `dotnet test` com **252/252 testes
+passando** (195 unit + 57 integration). Migration `AddDriverOperationsSchema`
+gerada com `dotnet ef migrations add`, reescrita à mão para incluir as
+transformações de dado acima (a geração automática apenas fazia
+`RenameColumn`, que teria movido valores para colunas com significado
+diferente), e validada de ponta a ponta contra um Postgres 16 real
+descartável: aplicação do zero, `Down`, dados sintéticos no formato antigo
+inseridos manualmente, reaplicação do `Up`, e conferência linha a linha do
+resultado (`PendingApproval→PendingDocuments`, `Approved`/`Rejected`
+inalterados; `DeliveryFee`/`DeliveryRadiusKm` corretos nos três ramos do
+`CASE` — Fixed com taxa, PerKm com `MinFee`, e o fallback de R$7).

@@ -17,4 +17,9 @@ public class AdminDeliveriesController(DeliveryService deliveryService) : Contro
     public async Task<IActionResult> GetAll(
         [FromQuery] Guid? cityId, [FromQuery] string? status, [FromQuery] PageRequest request, CancellationToken ct) =>
         Ok(await deliveryService.GetForAdminAsync(cityId, status, request, ct));
+
+    [HttpGet("{id:guid}/occurrences")]
+    [ProducesResponseType(typeof(List<DeliveryOccurrenceResponse>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetOccurrences(Guid id, CancellationToken ct) =>
+        Ok(await deliveryService.GetOccurrencesAsync(id, ct));
 }

@@ -57,17 +57,11 @@ export function putDeliveryPricing(merchantToken, establishmentId) {
   const res = apiSend(
     "PUT",
     `/api/merchant/establishments/${establishmentId}/delivery-pricing`,
-    {
-      urbanMode: "Fixed",
-      urbanFixedFee: 5,
-      urbanPricePerKm: 0,
-      urbanMinFee: 0,
-      ruralMode: "Fixed",
-      ruralFixedFee: 15,
-      ruralPricePerKm: 0,
-      ruralMinFee: 0,
-      maxDistanceKm: 50,
-    },
+    // Flat fee model (Urban/Rural x Fixed/PerKm was removed) — 5 keeps
+    // scenarios 03/04's `expectedFee = 5` valid, 50 mirrors the old
+    // maxDistanceKm so it comfortably covers the ~150m customer address
+    // bootstrapShop creates.
+    { deliveryFee: 5, deliveryRadiusKm: 50 },
     merchantToken,
     "setup:putDeliveryPricing",
   );
@@ -158,6 +152,49 @@ export function approveDriver(adminToken, driverId) {
     throw new Error(`setup(): approveDriver failed: ${res.status} ${res.body}`);
   }
   return parseJson(res);
+}
+
+/** Onboarding now requires CNH + vehicle on file before a SUPER_ADMIN can approve
+ * (DRIVER_LICENSE_REQUIRED / DRIVER_VEHICLE_REQUIRED otherwise) — called with the driver's
+ * OWN token, before approveDriver. */
+export function submitDriverLicense(driverToken) {
+  const expiresAt = new Date();
+  expiresAt.setFullYear(expiresAt.getFullYear() + 3);
+  const res = apiSend(
+    "PUT",
+    "/api/driver/me/documents/license",
+    {
+      registrationNumber: `PERF${Date.now()}`.slice(0, 32),
+      category: "A",
+      expiresAt: expiresAt.toISOString().slice(0, 10),
+      hasEar: true,
+      documentImageUrl: null,
+    },
+    driverToken,
+    "setup:submitDriverLicense",
+  );
+  if (!expectStatus(res, 200, "submitDriverLicense")) {
+    throw new Error(`setup(): submitDriverLicense failed: ${res.status} ${res.body}`);
+  }
+}
+
+export function submitDriverVehicle(driverToken) {
+  const res = apiSend(
+    "PUT",
+    "/api/driver/me/documents/vehicle",
+    {
+      type: "Motorcycle",
+      plate: `PERF${Date.now()}`.slice(0, 16),
+      model: "CG 160",
+      color: "Preto",
+      documentImageUrl: null,
+    },
+    driverToken,
+    "setup:submitDriverVehicle",
+  );
+  if (!expectStatus(res, 200, "submitDriverVehicle")) {
+    throw new Error(`setup(): submitDriverVehicle failed: ${res.status} ${res.body}`);
+  }
 }
 
 export function driverOnline(driverToken) {
@@ -276,8 +313,10 @@ export function bootstrapDrivers(adminToken, cityId, count, labelPrefix = "d") {
       pixKeyType: "Email",
       pixKey: email,
     });
-    approveDriver(adminToken, registered.driverId);
     const tokens = login(email, config.testPassword);
+    submitDriverLicense(tokens.accessToken);
+    submitDriverVehicle(tokens.accessToken);
+    approveDriver(adminToken, registered.driverId);
     driverOnline(tokens.accessToken);
     drivers.push({ email, driverId: registered.driverId, tokens });
   }

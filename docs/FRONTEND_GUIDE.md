@@ -148,14 +148,17 @@ Order.paymentMethod:  Pix, Cash, DebitOnDelivery, CreditOnDelivery
 Order.paymentStatus:  Pending, Paid, NotApplicable
 
 Delivery.status:      Available, Assigned, PickedUp, OutForDelivery, Completed, Cancelled
+DeliveryOccurrence.type: CustomerNotFound, CustomerNotResponding, WrongAddress, PaymentProblem, VehicleProblem, Other
 
-Driver.approvalStatus: PendingApproval, Approved, Rejected
+Driver.onboardingStatus: PendingDocuments, UnderReview, Approved, Rejected
+Driver.eligibilityStatus: Eligible, PendingDocuments, UnderReview, Rejected, Blocked, DocumentExpired   -- computado, ver docs/DRIVER_ONBOARDING.md
 Driver.status:         Offline, Available, Busy, Blocked
 Driver.vehicleType:    Bike, Motorcycle, Car
 Driver.pixKeyType:     Cpf, Email, Phone, Random
 
 Establishment.operationalStatus: Open, ClosedManual, ClosedSchedule, Paused
 Establishment.commercialStatus:  Active, OverdueGrace, SuspendedPayment, SuspendedAdmin, Inactive
+Establishment.pauseReason:       HighDemand, NoDriverAvailable, TemporaryClosure, Other   -- null quando não pausado
 
 Product.stockMode:    Uncontrolled, Controlled
 Address.type:         Urban, Rural

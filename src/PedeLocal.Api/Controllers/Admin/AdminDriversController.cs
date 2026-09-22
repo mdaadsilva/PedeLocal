@@ -14,8 +14,14 @@ public class AdminDriversController(DriverService driverService) : ControllerBas
 {
     [HttpGet]
     [ProducesResponseType(typeof(PagedResult<DriverResponse>), StatusCodes.Status200OK)]
-    public async Task<IActionResult> GetAll([FromQuery] string? approvalStatus, [FromQuery] PageRequest request, CancellationToken ct) =>
-        Ok(await driverService.GetAllAsync(approvalStatus, request, ct));
+    public async Task<IActionResult> GetAll([FromQuery] string? onboardingStatus, [FromQuery] PageRequest request, CancellationToken ct) =>
+        Ok(await driverService.GetAllAsync(onboardingStatus, request, ct));
+
+    /// <summary>Driver details plus whatever CNH/vehicle documentation has been submitted so far —
+    /// covers both "view driver details" and "view required documentation" in one payload.</summary>
+    [HttpGet("{id:guid}")]
+    [ProducesResponseType(typeof(DriverDetailResponse), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetById(Guid id, CancellationToken ct) => Ok(await driverService.GetByIdAsync(id, ct));
 
     [HttpPost("{id:guid}/approve")]
     [ProducesResponseType(typeof(DriverResponse), StatusCodes.Status200OK)]
@@ -26,6 +32,8 @@ public class AdminDriversController(DriverService driverService) : ControllerBas
     public async Task<IActionResult> Reject(Guid id, RejectDriverRequest request, CancellationToken ct) =>
         Ok(await driverService.RejectAsync(id, request, ct));
 
+    /// <summary>"Suspend" a previously approved driver — there is no separate SUSPENDED onboarding
+    /// state; Blocked/Unblock is the suspend/reactivate action (see Driver.OnboardingStatus remarks).</summary>
     [HttpPost("{id:guid}/block")]
     [ProducesResponseType(typeof(DriverResponse), StatusCodes.Status200OK)]
     public async Task<IActionResult> Block(Guid id, CancellationToken ct) => Ok(await driverService.SetBlockedAsync(id, true, ct));

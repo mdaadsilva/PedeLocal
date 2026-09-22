@@ -6,8 +6,13 @@ public static class AuditActions
     public const string StockAdjusted = "STOCK_ADJUSTED";
     public const string OrderCancelled = "ORDER_CANCELLED";
     public const string DriverApproved = "DRIVER_APPROVED";
+    public const string DriverRejected = "DRIVER_REJECTED";
+    public const string DriverBlocked = "DRIVER_BLOCKED";
+    public const string DriverUnblocked = "DRIVER_UNBLOCKED";
     public const string EstablishmentSuspended = "ESTABLISHMENT_SUSPENDED";
     public const string EstablishmentReactivated = "ESTABLISHMENT_REACTIVATED";
+    public const string EstablishmentPaused = "ESTABLISHMENT_PAUSED";
+    public const string EstablishmentResumed = "ESTABLISHMENT_RESUMED";
     public const string PaymentRegistered = "PAYMENT_REGISTERED";
     public const string FeatureChanged = "FEATURE_CHANGED";
     public const string RefreshTokenReuseDetected = "REFRESH_TOKEN_REUSE_DETECTED";

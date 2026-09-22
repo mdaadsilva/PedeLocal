@@ -18,7 +18,7 @@ namespace PedeLocal.Application.Deliveries;
 
 public class DeliveryService(
     IAppDbContext db, ICurrentUserService currentUser, ITokenService tokenService,
-    IRealtimeNotifier realtime, INotificationService notificationService)
+    IRealtimeNotifier realtime, INotificationService notificationService, Common.EstablishmentAccessGuard establishmentAccessGuard)
 {
     public async Task<List<DeliveryResponse>> GetAvailableAsync(CancellationToken ct)
     {
@@ -65,7 +65,7 @@ public class DeliveryService(
     public async Task<DeliveryResponse> AcceptAsync(Guid deliveryId, CancellationToken ct)
     {
         var driver = await GetOwnDriverAsync(ct);
-        EnsureDriverCanWork(driver);
+        await EnsureDriverEligibleAsync(driver, ct);
         if (driver.Status != DriverStatus.Available)
         {
             throw new ConflictException("DRIVER_ALREADY_ON_DELIVERY", "Você já está em uma entrega.");
@@ -311,17 +311,93 @@ public class DeliveryService(
             ?? throw new NotFoundException("DRIVER_PROFILE_NOT_FOUND", "Perfil de entregador não encontrado.");
     }
 
-    private static void EnsureDriverCanWork(Domain.Drivers.Driver driver)
+    private async Task EnsureDriverEligibleAsync(Domain.Drivers.Driver driver, CancellationToken ct)
     {
-        if (driver.ApprovalStatus != DriverApprovalStatus.Approved)
+        var license = await db.DriverLicenses.SingleOrDefaultAsync(l => l.DriverId == driver.Id, ct);
+        var eligibility = DriverEligibilityService.Evaluate(driver, license, DateTime.UtcNow);
+        if (eligibility != DriverEligibilityStatus.Eligible)
         {
-            throw new ForbiddenException("DRIVER_NOT_APPROVED", "Seu cadastro ainda não foi aprovado.");
-        }
-        if (driver.Status == DriverStatus.Blocked)
-        {
-            throw new ForbiddenException("DRIVER_BLOCKED", "Seu acesso está bloqueado.");
+            throw eligibility switch
+            {
+                DriverEligibilityStatus.Blocked => new ForbiddenException("DRIVER_BLOCKED", "Seu acesso está bloqueado."),
+                DriverEligibilityStatus.DocumentExpired => new ForbiddenException("DRIVER_DOCUMENT_EXPIRED", "Sua CNH está vencida. Atualize seus documentos."),
+                _ => new ForbiddenException("DRIVER_NOT_APPROVED", "Seu cadastro ainda não foi aprovado.")
+            };
         }
     }
+
+    public async Task<DeliveryOccurrenceResponse> AddOccurrenceAsync(Guid deliveryId, CreateDeliveryOccurrenceRequest request, CancellationToken ct)
+    {
+        var driver = await GetOwnDriverAsync(ct);
+        var delivery = await db.Deliveries.SingleOrDefaultAsync(d => d.Id == deliveryId, ct)
+            ?? throw new NotFoundException("DELIVERY_NOT_FOUND", "Entrega não encontrada.");
+
+        if (delivery.DriverId != driver.Id)
+        {
+            throw new ForbiddenException("DELIVERY_ACCESS_DENIED", "Você não é o entregador responsável por esta entrega.");
+        }
+        if (!Enum.TryParse<DeliveryOccurrenceType>(request.Type, ignoreCase: true, out var type))
+        {
+            throw new AppException("INVALID_OCCURRENCE_TYPE", "Tipo de ocorrência inválido.");
+        }
+
+        var occurrence = new DeliveryOccurrence
+        {
+            DeliveryId = delivery.Id,
+            DriverId = driver.Id,
+            Type = type,
+            Note = request.Note
+        };
+        db.DeliveryOccurrences.Add(occurrence);
+        await db.SaveChangesAsync(ct);
+
+        return ToOccurrenceResponse(occurrence);
+    }
+
+    /// <summary>Visible to the assigned driver, staff of the delivery's establishment, or Super
+    /// Admin — the same three parties who can already see everything else about a delivery.</summary>
+    public async Task<List<DeliveryOccurrenceResponse>> GetOccurrencesAsync(Guid deliveryId, CancellationToken ct)
+    {
+        var delivery = await db.Deliveries.SingleOrDefaultAsync(d => d.Id == deliveryId, ct)
+            ?? throw new NotFoundException("DELIVERY_NOT_FOUND", "Entrega não encontrada.");
+
+        if (!currentUser.IsInRole(Domain.Identity.RoleNames.SuperAdmin))
+        {
+            var userId = currentUser.UserId ?? throw new UnauthorizedAppException("UNAUTHENTICATED", "Usuário não autenticado.");
+            var isOwningDriver = await db.Drivers.AnyAsync(d => d.Id == delivery.DriverId && d.UserId == userId, ct);
+            var isEstablishmentStaff = await db.EstablishmentUsers.AnyAsync(eu => eu.EstablishmentId == delivery.EstablishmentId && eu.UserId == userId, ct);
+            if (!isOwningDriver && !isEstablishmentStaff)
+            {
+                throw new ForbiddenException("OCCURRENCE_ACCESS_DENIED", "Você não tem acesso às ocorrências desta entrega.");
+            }
+        }
+
+        return await db.DeliveryOccurrences
+            .Where(o => o.DeliveryId == deliveryId)
+            .OrderByDescending(o => o.CreatedAtUtc)
+            .Select(o => ToOccurrenceResponse(o))
+            .ToListAsync(ct);
+    }
+
+    /// <summary>Merchant-facing lookup by orderId (merchants never see a bare deliveryId elsewhere)
+    /// — resolves the order's delivery, then reuses the same establishment-ownership rule as every
+    /// other merchant endpoint.</summary>
+    public async Task<List<DeliveryOccurrenceResponse>> GetOccurrencesForMerchantAsync(Guid establishmentId, Guid orderId, CancellationToken ct)
+    {
+        await establishmentAccessGuard.EnsureAccessAsync(establishmentId, ct);
+
+        var delivery = await db.Deliveries.SingleOrDefaultAsync(d => d.OrderId == orderId && d.EstablishmentId == establishmentId, ct)
+            ?? throw new NotFoundException("DELIVERY_NOT_FOUND", "Entrega não encontrada.");
+
+        return await db.DeliveryOccurrences
+            .Where(o => o.DeliveryId == delivery.Id)
+            .OrderByDescending(o => o.CreatedAtUtc)
+            .Select(o => ToOccurrenceResponse(o))
+            .ToListAsync(ct);
+    }
+
+    private static DeliveryOccurrenceResponse ToOccurrenceResponse(DeliveryOccurrence o) => new(
+        o.Id, o.DeliveryId, o.DriverId, o.Type.ToString(), o.Note, o.CreatedAtUtc);
 
     /// <summary>Attempts to persist a delivery-driven order transition (Pickup/OutForDelivery/Confirm),
     /// each of which mutates both Delivery and Order together. Order.Version guards the race where

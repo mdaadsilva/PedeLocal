@@ -72,11 +72,19 @@ da assinatura e o horário via `OperationalStatus`.
 gap real, não como omissão silenciosa.
 
 Cada estabelecimento tem ~85% de chance de suportar Delivery (tem
-`DeliveryPricingSettings`, taxa Fixa ou por Km) — o resto é só Pickup, do
-jeito real que o domínio já trata a ausência dessa configuração (sem flag
-nova). Estoque: produtos candidatos a `Controlled` (carnes, hortifruti,
-bebidas geladas, farmácia etc.) ficam `Controlled` ~55% das vezes, com estoque
-normal/baixo/zerado distribuído 70/20/10 — o resto é `Uncontrolled`.
+`DeliveryPricingSettings` com `deliveryFee` fixo entre R$5-15 e
+`deliveryRadiusKm` entre 5-20km, variados por estabelecimento) — o resto é
+só Pickup, do jeito real que o domínio já trata a ausência dessa
+configuração (sem flag nova). Estoque: produtos candidatos a `Controlled`
+(carnes, hortifruti, bebidas geladas, farmácia etc.) ficam `Controlled`
+~55% das vezes, com estoque normal/baixo/zerado distribuído 70/20/10 — o
+resto é `Uncontrolled`.
+
+Uma pequena parcela dos estabelecimentos (~10%) fica `OperationalStatus.Paused`
+— motivo variado (`HighDemand`/`NoDriverAvailable`/`TemporaryClosure`/`Other`)
+e `pausedUntilUtc` distribuído entre "ainda pausado", "já venceu" (exercita
+`EstablishmentPauseExpiryJob`/a checagem lazy de pausa vencida) e "indefinido"
+(sem data, só resume manual).
 
 ## Contas de teste e credenciais
 
@@ -225,9 +233,23 @@ reais e a tabela de credenciais, e **sai sem subir o servidor HTTP**.
 - **Customer** (app mobile, login `customer.<cidade>@pedelocal.dev`): histórico
   de pedidos naquela cidade, endereço já cadastrado.
 - **Driver** (app mobile, login `driver.<cidade>@pedelocal.dev`): sempre
-  aprovado e pronto para uso imediato; alguns motoristas de preenchimento
-  ficam deliberadamente com uma entrega em andamento ("entrega atual") para
-  demonstrar esse estado.
+  `Approved`, com CNH válida e veículo cadastrados, pronto para uso
+  imediato; alguns motoristas de preenchimento ficam deliberadamente com
+  uma entrega em andamento ("entrega atual") para demonstrar esse estado.
+  Os entregadores de preenchimento cobrem toda a distribuição de onboarding
+  (ver seção "Entregadores" abaixo) — útil para testar a tela de revisão do
+  Super Admin sem precisar cadastrar um entregador novo manualmente.
+
+### Entregadores (CNH, veículo, onboarding)
+
+Distribuição dos entregadores de preenchimento (ver `docs/DRIVER_ONBOARDING.md`
+para o significado de cada estado): ~55% `Approved` com CNH válida, ~10%
+`Approved` mas com CNH **já vencida** (demonstra `DocumentExpired` sem mexer
+no `onboardingStatus`), ~15% `UnderReview` (CNH + veículo enviados,
+aguardando revisão), ~10% `PendingDocuments` (nada enviado ainda), ~5%
+`Rejected` (com motivo de reprovação preenchido), ~5% `Approved` porém
+`Blocked` (suspenso pelo admin). CNH e placas são sempre sintéticas —
+nenhum documento real.
 
 ## Limitações e gaps conhecidos
 
@@ -249,13 +271,16 @@ planejador puro (sem banco): determinismo, estoque nunca negativo,
 Subtotal+DeliveryFee=Total em todo pedido, Delivery só com
 `DeliveryPricingSettings`, motorista sempre da mesma cidade da entrega, no
 máximo uma entrega ativa por motorista, assinaturas só com enum real, janela
-de carência de 5 dias, e as contagens por perfil.
+de carência de 5 dias, as contagens por perfil, cobertura de todo estado de
+onboarding do entregador (incluindo CNH vencida), estabelecimentos pausados
+com motivo e expiração variados, e taxa/raio de entrega sempre positivos e
+variados entre estabelecimentos.
 
 `tests/PedeLocal.IntegrationTests/Demo/DemoDataSeederTests.cs` — testa contra
 um `PedeLocalDbContext` real (InMemory) via o container de DI da aplicação:
 guarda de ambiente (recusa fora de Development), idempotência (`SeedAsync` 2x
 não duplica), contas previsíveis autenticam de verdade, ownership do merchant,
-estoque/cidade coerentes, cobertura de assinatura, `ResetAsync` remove só as
-linhas demo preservando o `DevelopmentDataSeeder` intacto, reset sem seed
-prévio é no-op seguro, e troca de perfil sem reset não viola constraint única
-nenhuma.
+estoque/cidade coerentes, cobertura de assinatura, CNH/veículo seedados sem
+órfãos, `ResetAsync` remove só as linhas demo (CNH/veículo inclusive)
+preservando o `DevelopmentDataSeeder` intacto, reset sem seed prévio é no-op
+seguro, e troca de perfil sem reset não viola constraint única nenhuma.

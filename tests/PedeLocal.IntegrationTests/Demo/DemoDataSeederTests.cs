@@ -195,6 +195,30 @@ public class DemoDataSeederTests
     }
 
     [Fact]
+    public async Task SeedAsync_SeedsDriverLicensesAndVehicles_AndResetRemovesThem()
+    {
+        await using var factory = new PedeLocalWebApplicationFactory();
+        var (scope, db, hasher, tokens, cipher) = await PrepareAsync(factory);
+        using var _ = scope;
+
+        await DemoDataSeeder.SeedAsync(db, hasher, tokens, cipher, DemoSeedProfile.Small, "Development");
+
+        Assert.True(await db.DriverLicenses.AnyAsync());
+        Assert.True(await db.DriverVehicles.AnyAsync());
+        // Every DriverLicense/DriverVehicle row belongs to a seeded Driver — no orphans.
+        var driverIds = await db.Drivers.Select(d => d.Id).ToListAsync();
+        Assert.True(await db.DriverLicenses.AllAsync(l => driverIds.Contains(l.DriverId)));
+        Assert.True(await db.DriverVehicles.AllAsync(v => driverIds.Contains(v.DriverId)));
+
+        await DemoDataSeeder.ResetAsync(db, DemoSeedProfile.Small, "Development");
+
+        // DevelopmentDataSeeder's own example driver ("Entregador Exemplo") has a license/vehicle
+        // too, and — like its Establishment/Users rows — must survive a demo-data reset untouched.
+        Assert.True(await db.DriverLicenses.CountAsync() <= 1);
+        Assert.True(await db.DriverVehicles.CountAsync() <= 1);
+    }
+
+    [Fact]
     public async Task ResetAsync_WithoutAPriorSeed_IsANoOp()
     {
         await using var factory = new PedeLocalWebApplicationFactory();

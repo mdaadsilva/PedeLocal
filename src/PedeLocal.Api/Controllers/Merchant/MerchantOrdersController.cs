@@ -1,7 +1,9 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using PedeLocal.Application.Deliveries;
 using PedeLocal.Application.Orders;
 using PedeLocal.Contracts.Common;
+using PedeLocal.Contracts.Deliveries;
 using PedeLocal.Contracts.Orders;
 
 namespace PedeLocal.Api.Controllers.Merchant;
@@ -9,7 +11,7 @@ namespace PedeLocal.Api.Controllers.Merchant;
 [ApiController]
 [Route("api/merchant/establishments/{establishmentId:guid}/orders")]
 [Authorize]
-public class MerchantOrdersController(OrderService orderService) : ControllerBase
+public class MerchantOrdersController(OrderService orderService, DeliveryService deliveryService) : ControllerBase
 {
     [HttpGet]
     [ProducesResponseType(typeof(PagedResult<OrderResponse>), StatusCodes.Status200OK)]
@@ -45,4 +47,9 @@ public class MerchantOrdersController(OrderService orderService) : ControllerBas
     [ProducesResponseType(typeof(OrderResponse), StatusCodes.Status200OK)]
     public async Task<IActionResult> Cancel(Guid establishmentId, Guid orderId, CancelOrderRequest request, CancellationToken ct) =>
         Ok(await orderService.CancelAsync(establishmentId, orderId, request, ct));
+
+    [HttpGet("{orderId:guid}/occurrences")]
+    [ProducesResponseType(typeof(List<DeliveryOccurrenceResponse>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetOccurrences(Guid establishmentId, Guid orderId, CancellationToken ct) =>
+        Ok(await deliveryService.GetOccurrencesForMerchantAsync(establishmentId, orderId, ct));
 }

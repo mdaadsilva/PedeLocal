@@ -64,13 +64,14 @@ foi mockado.
 
 ## 8. Entregadores: cidade, disponibilidade e histórico
 
-- **Funcionalidade:** operação de frota no admin.
-- **Endpoints necessários:**
-  - `GET /api/admin/drivers?cityId=&status=&approvalStatus=&page=`
-  - `GET /api/admin/drivers/{id}`
+- **Resolvido em parte:** `GET /api/admin/drivers/{id}` agora existe
+  (`DriverDetailResponse` — perfil + CNH + veículo enviados até agora, ver
+  `docs/DRIVER_ONBOARDING.md`), e o filtro de listagem passou a se chamar
+  `onboardingStatus` (não mais `approvalStatus`).
+- **Ainda falta:**
+  - `GET /api/admin/drivers?cityId=&status=&onboardingStatus=&page=` (filtro por cidade/status operacional continua ausente)
   - `GET /api/admin/drivers/{id}/deliveries?page=`
-- **Motivo:** a listagem filtra só `approvalStatus`. Não há detalhe nem histórico. A “entrega atual” é inferida de `GET /api/admin/deliveries` (máx. 100).
-- **Dados esperados:** dados públicos do entregador (sem CPF/Pix na listagem), status, cityId, entrega corrente e histórico resumido.
+- **Motivo:** a "entrega atual" ainda é inferida de `GET /api/admin/deliveries` (máx. 100), e não há histórico de entregas por entregador.
 - **Prioridade:** média.
 
 ## 9. Entregas admin mais ricas
@@ -124,7 +125,7 @@ foi mockado.
 | Assinaturas | `GET/PUT /api/admin/establishments/{id}/subscription`, `GET/POST .../payments` |
 | Features | `GET/PUT /api/admin/establishments/{id}/features/{featureKey}` |
 | Clientes | `GET /api/admin/customers` |
-| Entregadores | `GET /api/admin/drivers`, `POST /{id}/approve\|reject\|block\|unblock` |
+| Entregadores | `GET /api/admin/drivers`, `GET /{id}`, `POST /{id}/approve\|reject\|block\|unblock` |
 | Pedidos | `GET /api/admin/orders`, detalhe via `GET /api/merchant/establishments/{id}/orders/{orderId}` |
 | Entregas | `GET /api/admin/deliveries` |
 | Auditoria | `GET /api/admin/audit-logs` |

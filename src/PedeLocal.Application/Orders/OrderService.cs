@@ -485,8 +485,11 @@ public class OrderService(
         {
             throw new ConflictException("ESTABLISHMENT_SUSPENDED", "Este estabelecimento está suspenso.");
         }
-        if (establishment.OperationalStatus != OperationalStatus.Open)
+        if (!establishment.IsOperationallyOpen())
         {
+            // Covers both a manual/scheduled closure and an active Paused status — a pause (with or
+            // without an expiry) blocks every new order (DELIVERY and PICKUP alike) exactly like any
+            // other closure; existing orders are untouched.
             throw new ConflictException("ESTABLISHMENT_CLOSED", "Este estabelecimento está fechado no momento.");
         }
 
@@ -521,7 +524,7 @@ public class OrderService(
 
             var distance = routeDistanceService.CalculateDistanceKm(
                 establishmentAddress.Latitude, establishmentAddress.Longitude, deliveryAddress.Latitude, deliveryAddress.Longitude);
-            var feeQuote = DeliveryFeeCalculator.Calculate(pricingSettings, deliveryAddress.Type, distance);
+            var feeQuote = DeliveryFeeCalculator.Calculate(pricingSettings, distance);
 
             deliveryFee = feeQuote.Fee;
             distanceKm = feeQuote.DistanceKm;
@@ -531,13 +534,20 @@ public class OrderService(
         var (orderItems, itemOptions, subtotal) = await BuildOrderItemsAsync(establishment.Id, request.Items, ct);
 
         decimal? changeForAmount = null;
-        if (paymentMethod == PaymentMethod.Cash && request.ChangeForAmount is > 0)
+        if (paymentMethod == PaymentMethod.Cash)
         {
-            if (request.ChangeForAmount < subtotal + deliveryFee)
+            if (request.ChangeForAmount is > 0)
             {
-                throw new AppException("INVALID_CHANGE_AMOUNT", "O valor para troco deve ser maior ou igual ao total do pedido.");
+                if (request.ChangeForAmount < subtotal + deliveryFee)
+                {
+                    throw new AppException("INVALID_CHANGE_AMOUNT", "O valor para troco deve ser maior ou igual ao total do pedido.");
+                }
+                changeForAmount = request.ChangeForAmount;
             }
-            changeForAmount = request.ChangeForAmount;
+        }
+        else if (request.ChangeForAmount is > 0)
+        {
+            throw new AppException("CHANGE_AMOUNT_NOT_APPLICABLE", "Troco só se aplica a pagamentos em dinheiro.");
         }
 
         return new OrderQuote(establishment, orderType, paymentMethod, deliveryAddress, orderItems, itemOptions,
@@ -780,7 +790,7 @@ public class OrderService(
     {
         var driverUserIds = await db.Drivers
             .Where(d => d.CityId == cityId
-                && d.ApprovalStatus == Domain.Drivers.DriverApprovalStatus.Approved
+                && d.OnboardingStatus == Domain.Drivers.DriverOnboardingStatus.Approved
                 && d.Status == Domain.Drivers.DriverStatus.Available)
             .Select(d => d.UserId)
             .ToListAsync(ct);

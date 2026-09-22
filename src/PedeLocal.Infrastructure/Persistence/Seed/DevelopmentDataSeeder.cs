@@ -55,7 +55,7 @@ public static class DevelopmentDataSeeder
         var driverUser = CreateUser("Entregador Exemplo", DriverEmail, "14999900003", passwordHasher);
         AssignRole(driverUser, driverRole);
         db.Users.Add(driverUser);
-        db.Drivers.Add(new Driver
+        var driver = new Driver
         {
             UserId = driverUser.Id,
             CityId = guaimbe.Id,
@@ -63,9 +63,20 @@ public static class DevelopmentDataSeeder
             VehicleType = VehicleType.Motorcycle,
             PixKeyType = PixKeyType.Cpf,
             PixKey = "11122233344",
-            ApprovalStatus = DriverApprovalStatus.Approved,
+            OnboardingStatus = DriverOnboardingStatus.Approved,
             Status = DriverStatus.Offline,
-            ApprovedAtUtc = DateTime.UtcNow
+            ReviewedAtUtc = DateTime.UtcNow
+        };
+        db.Drivers.Add(driver);
+        db.DriverLicenses.Add(new DriverLicense
+        {
+            DriverId = driver.Id, RegistrationNumber = "99900000001", Category = "A",
+            ExpiresAt = DateOnly.FromDateTime(DateTime.UtcNow.AddYears(3)), HasEar = true
+        });
+        db.DriverVehicles.Add(new DriverVehicle
+        {
+            DriverId = driver.Id, Type = VehicleType.Motorcycle, Plate = "DEM0001",
+            Model = "Honda CG 160", Color = "Preto"
         });
 
         var category = await db.EstablishmentCategories.FirstOrDefaultAsync(c => c.Name == "Lanchonete", ct);
@@ -102,9 +113,8 @@ public static class DevelopmentDataSeeder
         db.DeliveryPricingSettings.Add(new DeliveryPricingSettings
         {
             EstablishmentId = establishment.Id,
-            UrbanMode = DeliveryFeeMode.PerKm, UrbanPricePerKm = 2m, UrbanMinFee = 5m,
-            RuralMode = DeliveryFeeMode.PerKm, RuralPricePerKm = 3m, RuralMinFee = 15m,
-            MaxDistanceKm = 20
+            DeliveryFee = 7m,
+            DeliveryRadiusKm = 20
         });
 
         db.EstablishmentSubscriptions.Add(new EstablishmentSubscription

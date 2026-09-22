@@ -54,9 +54,8 @@ public class OrderTestFixture
         db.DeliveryPricingSettings.Add(new DeliveryPricingSettings
         {
             EstablishmentId = establishment.Id,
-            UrbanMode = DeliveryFeeMode.PerKm, UrbanPricePerKm = 3m, UrbanMinFee = 5m,
-            RuralMode = DeliveryFeeMode.PerKm, RuralPricePerKm = 3m, RuralMinFee = 15m,
-            MaxDistanceKm = 50
+            DeliveryFee = 7m,
+            DeliveryRadiusKm = 50
         });
 
         var category = new MenuCategory { EstablishmentId = establishment.Id, Name = "Lanches" };

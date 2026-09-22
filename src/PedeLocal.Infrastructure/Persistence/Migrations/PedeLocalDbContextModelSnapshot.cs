@@ -414,21 +414,46 @@ namespace PedeLocal.Infrastructure.Persistence.Migrations
                     b.ToTable("delivery_confirmations", (string)null);
                 });
 
-            modelBuilder.Entity("PedeLocal.Domain.Drivers.Driver", b =>
+            modelBuilder.Entity("PedeLocal.Domain.Deliveries.DeliveryOccurrence", b =>
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
-                    b.Property<string>("ApprovalStatus")
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("DeliveryId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("DriverId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<string>("Type")
                         .IsRequired()
                         .HasMaxLength(32)
                         .HasColumnType("character varying(32)");
 
-                    b.Property<DateTime?>("ApprovedAtUtc")
+                    b.Property<DateTime>("UpdatedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
-                    b.Property<Guid?>("ApprovedByUserId")
+                    b.HasKey("Id");
+
+                    b.HasIndex("DeliveryId");
+
+                    b.HasIndex("DriverId");
+
+                    b.ToTable("delivery_occurrences", (string)null);
+                });
+
+            modelBuilder.Entity("PedeLocal.Domain.Drivers.Driver", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
                     b.Property<Guid>("CityId")
@@ -442,6 +467,11 @@ namespace PedeLocal.Infrastructure.Persistence.Migrations
                     b.Property<DateTime>("CreatedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<string>("OnboardingStatus")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
                     b.Property<string>("PixKey")
                         .IsRequired()
                         .HasMaxLength(256)
@@ -451,6 +481,16 @@ namespace PedeLocal.Infrastructure.Persistence.Migrations
                         .IsRequired()
                         .HasMaxLength(16)
                         .HasColumnType("character varying(16)");
+
+                    b.Property<string>("RejectionReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<DateTime?>("ReviewedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("ReviewedByUserId")
+                        .HasColumnType("uuid");
 
                     b.Property<string>("Status")
                         .IsRequired()
@@ -479,6 +519,83 @@ namespace PedeLocal.Infrastructure.Persistence.Migrations
                         .IsUnique();
 
                     b.ToTable("drivers", (string)null);
+                });
+
+            modelBuilder.Entity("PedeLocal.Domain.Drivers.DriverLicense", b =>
+                {
+                    b.Property<Guid>("DriverId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Category")
+                        .IsRequired()
+                        .HasMaxLength(8)
+                        .HasColumnType("character varying(8)");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("DocumentImageUrl")
+                        .HasMaxLength(2048)
+                        .HasColumnType("character varying(2048)");
+
+                    b.Property<DateOnly>("ExpiresAt")
+                        .HasColumnType("date");
+
+                    b.Property<bool?>("HasEar")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("RegistrationNumber")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("DriverId");
+
+                    b.ToTable("driver_licenses", (string)null);
+                });
+
+            modelBuilder.Entity("PedeLocal.Domain.Drivers.DriverVehicle", b =>
+                {
+                    b.Property<Guid>("DriverId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Color")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("DocumentImageUrl")
+                        .HasMaxLength(2048)
+                        .HasColumnType("character varying(2048)");
+
+                    b.Property<string>("Model")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("Plate")
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<string>("Type")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("DriverId");
+
+                    b.ToTable("driver_vehicles", (string)null);
                 });
 
             modelBuilder.Entity("PedeLocal.Domain.Establishments.Establishment", b =>
@@ -523,6 +640,19 @@ namespace PedeLocal.Infrastructure.Persistence.Migrations
                         .IsRequired()
                         .HasMaxLength(32)
                         .HasColumnType("character varying(32)");
+
+                    b.Property<string>("PauseReason")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<DateTime?>("PausedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("PausedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("PausedUntilUtc")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("Phone")
                         .IsRequired()
@@ -1168,35 +1298,10 @@ namespace PedeLocal.Infrastructure.Persistence.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
-                    b.Property<decimal>("MaxDistanceKm")
+                    b.Property<decimal>("DeliveryFee")
                         .HasColumnType("numeric(12,2)");
 
-                    b.Property<decimal>("RuralFixedFee")
-                        .HasColumnType("numeric(12,2)");
-
-                    b.Property<decimal>("RuralMinFee")
-                        .HasColumnType("numeric(12,2)");
-
-                    b.Property<string>("RuralMode")
-                        .IsRequired()
-                        .HasMaxLength(16)
-                        .HasColumnType("character varying(16)");
-
-                    b.Property<decimal>("RuralPricePerKm")
-                        .HasColumnType("numeric(12,2)");
-
-                    b.Property<decimal>("UrbanFixedFee")
-                        .HasColumnType("numeric(12,2)");
-
-                    b.Property<decimal>("UrbanMinFee")
-                        .HasColumnType("numeric(12,2)");
-
-                    b.Property<string>("UrbanMode")
-                        .IsRequired()
-                        .HasMaxLength(16)
-                        .HasColumnType("character varying(16)");
-
-                    b.Property<decimal>("UrbanPricePerKm")
+                    b.Property<decimal>("DeliveryRadiusKm")
                         .HasColumnType("numeric(12,2)");
 
                     b.HasKey("EstablishmentId");
